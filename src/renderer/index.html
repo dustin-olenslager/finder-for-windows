@@ -7,19 +7,56 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- M1 skeleton: the smallest surface that proves the IPC bridge end to end.
-       The real three-region shell (sidebar / content / toolbar) is M2 and gets a
-       wireframe first. Do not grow this file into the interface. -->
-  <header class="bar">
-    <button id="back" class="btn" title="Back" aria-label="Back" disabled>‹</button>
-    <button id="up" class="btn" title="Enclosing folder" aria-label="Enclosing folder">↑</button>
-    <span id="path" class="path"></span>
-    <span id="count" class="count"></span>
+  <!-- Drag strip. The native window controls sit in the overlay on the right
+       (see titleBarOverlay in main.js), so this row is pure drag space. -->
+  <div class="titlebar"></div>
+
+  <header class="toolbar">
+    <div class="toolbar-left">
+      <button id="back" class="icon-btn" title="Back" aria-label="Back">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 2 4 8l6 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button id="forward" class="icon-btn" title="Forward" aria-label="Forward">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button id="up" class="icon-btn" title="Enclosing folder" aria-label="Enclosing folder">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 13.5V4M4 8l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+
+    <div class="toolbar-title" id="folderTitle">Finder for Windows</div>
+
+    <div class="toolbar-right">
+      <div class="segmented" role="group" aria-label="View">
+        <button class="seg is-active" data-view="column" title="as Columns" aria-label="Column view" aria-pressed="true">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="3" width="3.6" height="10" rx="1"/><rect x="6.2" y="3" width="3.6" height="10" rx="1"/><rect x="10.9" y="3" width="3.6" height="10" rx="1"/></svg>
+        </button>
+        <button class="seg" data-view="list" title="as List" aria-label="List view" aria-pressed="false">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="2.2" rx="1"/><rect x="2" y="6.9" width="12" height="2.2" rx="1"/><rect x="2" y="10.8" width="12" height="2.2" rx="1"/></svg>
+        </button>
+        <button class="seg" data-view="icon" title="as Icons" aria-label="Icon view" aria-pressed="false">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="5" height="5" rx="1.2"/><rect x="9" y="2" width="5" height="5" rx="1.2"/><rect x="2" y="9" width="5" height="5" rx="1.2"/><rect x="9" y="9" width="5" height="5" rx="1.2"/></svg>
+        </button>
+      </div>
+
+      <label class="search">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.4 10.4 14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <input id="search" type="search" placeholder="Search" autocomplete="off" spellcheck="false" aria-label="Search this folder">
+      </label>
+    </div>
   </header>
 
-  <main id="content" class="content" aria-live="polite">
-    <p class="hint">Loading…</p>
-  </main>
+  <div class="body">
+    <nav class="sidebar" id="sidebar" aria-label="Sidebar"></nav>
+    <main class="content" id="content" aria-live="polite">
+      <p class="hint">Loading…</p>
+    </main>
+  </div>
+
+  <footer class="statusbar">
+    <span class="status-count" id="statusCount"></span>
+    <span class="status-path" id="statusPath"></span>
+  </footer>
 
   <script src="app.js"></script>
 </body>

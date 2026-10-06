@@ -8,29 +8,73 @@
  * it may import Electron, Node's fs, or any vendor module.
  */
 
-const { app, BrowserWindow, ipcMain } = require('electron')
+const { app, BrowserWindow, ipcMain, shell } = require('electron')
+const { execFile } = require('node:child_process')
+const fs = require('node:fs')
 const path = require('node:path')
 
 const { listDirectory } = require('../application/list-directory')
+const { getSidebar } = require('../application/get-sidebar')
 const { createFsDirectoryReader } = require('../adapters/fs-directory-reader')
+const { createElectronKnownFolders } = require('../adapters/electron-known-folders')
+const { createWindowsDrives } = require('../adapters/windows-drives')
+const { normalizePath, parentOf, joinPath, segments } = require('../domain/paths')
+
+/** `execFile` as a promise with a hard timeout, so no drive can hang the UI. */
+function exec(command, args, { timeout = 4000 } = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { timeout, windowsHide: true, maxBuffer: 1024 * 1024 }, (error, stdout) => {
+      if (error) reject(error)
+      else resolve({ stdout: String(stdout) })
+    })
+  })
+}
 
 /** Build the wired-up use cases for this process. */
 function createContainer() {
   const directoryReader = createFsDirectoryReader()
+  const knownFolders = createElectronKnownFolders({
+    app,
+    exists: (p) => {
+      try {
+        return fs.statSync(p).isDirectory()
+      } catch {
+        return false
+      }
+    }
+  })
+  const drives = createWindowsDrives({ exec, fsModule: fs })
+
   return {
-    listDirectory: (dirPath) => listDirectory({ directoryReader }, dirPath)
+    // Every path is normalized before it reaches a port: "C:" becomes "C:\", which
+    // is the difference between listing the drive root and listing whatever folder
+    // the process happens to be sitting in.
+    listDirectory: (dirPath) => listDirectory({ directoryReader }, normalizePath(dirPath) ?? dirPath),
+    getSidebar: () => getSidebar({ knownFolders, drives }),
+    startFolder: () => normalizePath(app.getPath('home')) ?? app.getPath('home'),
+
+    // Path arithmetic is a domain concern, but the renderer cannot require the domain
+    // layer — it has no Node access. These three channels are the renderer's only way
+    // to build or walk a path, which keeps "C:" handling in exactly one place.
+    joinPath: (dirPath, name) => joinPath(dirPath, name),
+    parentPath: (dirPath) => parentOf(dirPath),
+    pathSegments: (dirPath) => segments(dirPath)
   }
 }
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1100,
-    height: 720,
-    minWidth: 640,
-    minHeight: 420,
+    width: 1180,
+    height: 760,
+    minWidth: 720,
+    minHeight: 460,
     title: 'Finder for Windows',
     backgroundColor: '#1c1c1e',
     show: false,
+    // macOS-style chrome: hide the OS title bar so the toolbar is the top of the
+    // window, while the native window controls stay usable in the overlay.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#00000000', symbolColor: '#98989d', height: 40 },
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       contextIsolation: true,
@@ -41,6 +85,12 @@ function createWindow() {
 
   win.once('ready-to-show', () => win.show())
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'))
+
+  // Links never navigate the app window.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url)
+    return { action: 'deny' }
+  })
 }
 
 app.whenReady().then(() => {
@@ -49,7 +99,19 @@ app.whenReady().then(() => {
   // The IPC boundary. The renderer never touches the filesystem: it calls these
   // channels, which delegate to a use case, which depends only on a port.
   ipcMain.handle('list-directory', (_event, dirPath) => container.listDirectory(dirPath))
-  ipcMain.handle('start-folder', () => app.getPath('home'))
+  ipcMain.handle('get-sidebar', () => container.getSidebar())
+  ipcMain.handle('start-folder', () => container.startFolder())
+  ipcMain.handle('join-path', (_event, dirPath, name) => container.joinPath(dirPath, name))
+  ipcMain.handle('parent-path', (_event, dirPath) => container.parentPath(dirPath))
+  ipcMain.handle('path-segments', (_event, dirPath) => container.pathSegments(dirPath))
+  ipcMain.handle('reveal-in-explorer', (_event, target) => {
+    shell.showItemInFolder(target)
+    return { ok: true }
+  })
+  ipcMain.handle('open-with-default', async (_event, target) => {
+    const error = await shell.openPath(target)
+    return error ? { ok: false, error } : { ok: true }
+  })
 
   createWindow()
 
