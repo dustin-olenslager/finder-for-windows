@@ -31,13 +31,15 @@ src/renderer        presentation and view state only
 - **Date:** 2026-10-05
 - **Status:** Accepted
 - **Context:** The repo's standing rule is one branch, one PR, squash-merge. The owner asked for the
-  app to be built end-to-end and delivered as an installer he can test, explicitly without pull
-  requests.
-- **Options considered:** (a) keep the branch-and-PR flow and hand him PR links — rejected, he does
-  not want them; (b) drop the kit's gates along with the PRs — rejected, the gates are what stop a
-  wrong change; (c) keep every gate and every artifact, and land on `main` directly.
+  app to be built end-to-end and handed to him as an installer he can test on his own machine. He said
+  he did not want more PRs; he later clarified he was not asking for an existing PR to be dropped, only
+  that the *whole build* get finished rather than arriving as PR-by-PR review ceremony.
+- **Options considered:** (a) keep the branch-and-PR flow and hand him PR links — rejected, that is the
+  ceremony he is trying to avoid; (b) drop the kit's gates along with the PRs — rejected, the gates are
+  what stop a wrong change; (c) keep every gate and every artifact, and land on `main` directly.
 - **Decision:** (c). Commits go to `main` directly; the spec, plan, tests, worklog, and the kit's
-  checks still apply on every change.
+  checks still apply on every change. Dropping PR #3 was a consequence of (c), not a request in its own
+  right — its content (the plan) was preserved and landed on `main` in `be47cb3`.
 - **Consequences:** the review step that a PR provided is gone, so the automated gates and the test
   suite carry that weight. **Revisit when the owner says so** — restore branch + PR and this ADR is
   marked Superseded.
