@@ -46,5 +46,40 @@ contextBridge.exposeInMainWorld('finder', {
   revealInExplorer: (target) => ipcRenderer.invoke('reveal-in-explorer', target),
 
   /** Open an item with the Windows default application. */
-  openWithDefault: (target) => ipcRenderer.invoke('open-with-default', target)
+  openWithDefault: (target) => ipcRenderer.invoke('open-with-default', target),
+
+  // ---- search -------------------------------------------------------------
+
+  /** Search the index. { text, scope: 'folder'|'everywhere', folder } */
+  search: (request) => ipcRenderer.invoke('search', request),
+
+  /** Whether the index exists, and what the last scan covered. */
+  indexStatus: () => ipcRenderer.invoke('index-status'),
+
+  /** Walk the drives and build the index. Long-running; resolves at the end. */
+  buildIndex: () => ipcRenderer.invoke('build-index'),
+
+  /** Ask a running scan to stop. It stops between folders, not mid-file. */
+  cancelIndex: () => ipcRenderer.invoke('cancel-index'),
+
+  /**
+   * Scan progress. Returns an unsubscribe function so a caller can stop listening —
+   * the preload never hands the renderer the raw ipcRenderer.
+   */
+  onIndexProgress: (callback) => {
+    const listener = (_event, progress) => callback(progress)
+    ipcRenderer.on('index-progress', listener)
+    return () => ipcRenderer.removeListener('index-progress', listener)
+  },
+
+  // ---- tags ---------------------------------------------------------------
+
+  /** Every tag and the files carrying it. */
+  listTags: () => ipcRenderer.invoke('list-tags'),
+
+  /** Attach a tag to a file. The record's path+size+mtime identify it. */
+  tagItem: (record, tagName) => ipcRenderer.invoke('tag-item', record, tagName),
+
+  /** Remove one tag from a file. */
+  untagItem: (record, tagName) => ipcRenderer.invoke('untag-item', record, tagName)
 })

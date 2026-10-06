@@ -115,14 +115,15 @@ with sync_playwright() as p:
     check("icon view renders a grid", s3["cls"] == "content content-icons", s3["cls"])
     check("icon view shows every item", s3["cells"] == 11, str(s3["cells"]))
 
-    # --- search filter ---
+    # --- search (the index-backed one is exercised later; this checks the box works) ---
     pg.click('.seg[data-view="column"]')
     pg.wait_for_timeout(200)
-    pg.fill("#search", "notes")
-    pg.wait_for_timeout(300)
-    s4 = pg.evaluate("() => ({ rows: document.querySelectorAll('.row').length, status: document.getElementById('statusCount').textContent })")
-    check("search filters to one match", s4["rows"] == 1, str(s4["rows"]))
-    check("status shows the filter", "filtered from" in s4["status"], s4["status"])
+    pg.fill("#search", "budget")
+    pg.wait_for_timeout(700)
+    s4 = pg.evaluate("() => ({ rows: document.querySelectorAll('.row-result').length, bar: document.getElementById('searchbar').hidden })")
+    check("typing in the search box shows results", s4["rows"] >= 1 and s4["bar"] is False, str(s4))
+    pg.click("#searchClear")
+    pg.wait_for_timeout(400)
 
     # --- Escape clears the filter ---
     pg.keyboard.press("Escape")
@@ -234,6 +235,87 @@ with sync_playwright() as p:
     check("Delete issues a trash operation, not a delete", ops and ops[0]["op"] == "trash", str(ops))
     check("trash targets the selected item", ops and ops[0]["path"].endswith("readme.txt"), str(ops))
     check("trash reports itself in a toast", pg.evaluate("() => !!document.querySelector('.toast')") is True)
+
+    # --- Search: results replace the folder, and content hits are labeled ---
+    pg.fill("#search", "shot")
+    pg.wait_for_timeout(700)
+    res = pg.evaluate(
+        """() => ({
+            rows: [...document.querySelectorAll('.row-result')].map(r => ({
+                name: r.dataset.name,
+                path: r.dataset.path,
+                matched: r.querySelector('.col-kind').textContent,
+                where: r.querySelector('.row-where')?.textContent || ''
+            })),
+            barVisible: !document.getElementById('searchbar').hidden,
+            summary: document.getElementById('searchSummary').textContent,
+            scopeVisible: !document.getElementById('scopeWrap').hidden,
+            columnsGone: document.querySelectorAll('.column').length === 0
+        })"""
+    )
+    check("search results replace the folder listing", res["columnsGone"] and len(res["rows"]) == 2, str(res["rows"]))
+    check("the name hit is listed first", res["rows"][0]["name"] == "shot-list-final.mp4", str(res["rows"][0]))
+    check("a content-only hit is found and labeled", res["rows"][1]["name"] == "meeting.md" and res["rows"][1]["matched"] == "Contents", str(res["rows"][1]))
+    check("a result shows the folder it lives in", "Documents" in res["rows"][1]["where"], res["rows"][1]["where"])
+    check("the summary states the count", "2 results" in res["summary"], res["summary"])
+    check("the scope selector appears with the results", res["scopeVisible"])
+
+    # --- scope: This Folder only returns what is inside the folder being viewed ---
+    # Both fixtures live under C:\Users\dustin, so narrowing to C:\Users\dustin\Videos
+    # must drop the one in Documents and keep the one in Videos.
+    pg.click("#searchClear")  # back to the folder before navigating
+    pg.wait_for_timeout(500)
+    pg.click('.column[data-index="0"] .row[data-name="Videos"]')
+    pg.wait_for_timeout(500)
+    pg.fill("#search", "shot")
+    pg.wait_for_timeout(700)
+    pg.select_option("#scope", "folder")
+    pg.wait_for_timeout(700)
+    narrowed = pg.evaluate("() => [...document.querySelectorAll('.row-result')].map(r => r.dataset.name)")
+    check(
+        "This Folder scope excludes results outside the folder",
+        narrowed == ["shot-list-final.mp4"],
+        str(narrowed),
+    )
+
+    pg.select_option("#scope", "everywhere")
+    pg.wait_for_timeout(600)
+    widened = pg.evaluate("() => document.querySelectorAll('.row-result').length")
+    check("Everywhere scope brings the outside results back", widened == 2, str(widened))
+
+    # --- a query matching nothing says so plainly ---
+    pg.fill("#search", "zzzznotfound")
+    pg.wait_for_timeout(700)
+    none = pg.evaluate("() => ({ rows: document.querySelectorAll('.row-result').length, hint: document.querySelector('.hint')?.textContent || '' })")
+    check("no matches is stated, not a blank pane", none["rows"] == 0 and "Nothing matches" in none["hint"], str(none))
+
+    # --- clearing the search brings the folder back ---
+    pg.click("#searchClear")
+    pg.wait_for_timeout(500)
+    restored = pg.evaluate(
+        "() => ({ columns: document.querySelectorAll('.column').length, bar: document.getElementById('searchbar').hidden })"
+    )
+    check("clearing the search restores the folder", restored["columns"] >= 1 and restored["bar"] is True, str(restored))
+
+    # --- selecting a result previews THAT file ---
+    pg.fill("#search", "meeting")
+    pg.wait_for_timeout(700)
+    pg.click(".row-result")
+    pg.wait_for_timeout(500)
+    picked = pg.evaluate("() => ({ name: document.getElementById('previewName').textContent, rows: document.querySelectorAll('.row-result.is-selected').length })")
+    check("selecting a result previews it", picked["name"] == "meeting.md" and picked["rows"] == 1, str(picked))
+
+    pg.fill("#search", "")
+    pg.wait_for_timeout(400)
+
+    # --- the index bar says what is covered ---
+    pg.reload()
+    pg.wait_for_timeout(900)
+    indexbar = pg.evaluate(
+        "() => ({ hidden: document.getElementById('indexbar').hidden, text: document.getElementById('indexText').textContent, action: document.getElementById('indexAction').textContent })"
+    )
+    check("the index bar reports coverage", indexbar["hidden"] is False and "Index covers" in indexbar["text"], str(indexbar))
+    check("the index bar offers to rebuild", indexbar["action"] == "Build Index", indexbar["action"])
 
     check("no page errors anywhere", not errs, str(errs[:2]))
     b.close()

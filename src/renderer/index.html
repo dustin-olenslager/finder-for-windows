@@ -35,6 +35,15 @@
     <div class="toolbar-title" id="folderTitle">Finder for Windows</div>
 
     <div class="toolbar-right">
+      <!-- Where a search looks. Finder has the same choice, and "everywhere" is the
+           default because that is what a person means when they search. -->
+      <label class="scope" id="scopeWrap" hidden>
+        <select id="scope" aria-label="Where to search">
+          <option value="everywhere">Everywhere</option>
+          <option value="folder">This Folder</option>
+        </select>
+      </label>
+
       <div class="segmented" role="group" aria-label="View">
         <button class="seg is-active" data-view="column" title="as Columns" aria-label="Column view" aria-pressed="true">
           <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="3" width="3.6" height="10" rx="1"/><rect x="6.2" y="3" width="3.6" height="10" rx="1"/><rect x="10.9" y="3" width="3.6" height="10" rx="1"/></svg>
@@ -49,7 +58,7 @@
 
       <label class="search">
         <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.4 10.4 14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        <input id="search" type="search" placeholder="Search" autocomplete="off" spellcheck="false" aria-label="Search this folder">
+        <input id="search" type="search" placeholder="Search" autocomplete="off" spellcheck="false" aria-label="Search">
         <button type="button" class="search-clear" id="searchClear" title="Clear search" aria-label="Clear search" hidden>
           <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.4" fill="currentColor" opacity=".22"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         </button>
@@ -61,6 +70,22 @@
       </button>
     </div>
   </header>
+
+  <!-- Search results replace the folder listing, exactly as they do in Finder. -->
+  <div class="searchbar" id="searchbar" hidden>
+    <span class="searchbar-label" id="searchSummary"></span>
+    <span class="searchbar-spacer"></span>
+    <button type="button" class="text-btn" id="searchExit">Back to Folder</button>
+  </div>
+
+  <!-- Index coverage. A search that silently knows only part of the disk is worse than
+       no search, so the app always says what it has looked at. -->
+  <div class="indexbar" id="indexbar" hidden>
+    <span class="indexbar-text" id="indexText"></span>
+    <span class="indexbar-spacer"></span>
+    <button type="button" class="text-btn" id="indexAction"></button>
+    <button type="button" class="text-btn subtle" id="indexDismiss">Dismiss</button>
+  </div>
 
   <nav class="breadcrumb" id="breadcrumb" aria-label="Path"></nav>
 

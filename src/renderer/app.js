@@ -30,6 +30,15 @@ const el = {
   previewToggle: document.getElementById('previewToggle'),
   previewClose: document.getElementById('previewClose'),
   searchClear: document.getElementById('searchClear'),
+  scope: document.getElementById('scope'),
+  scopeWrap: document.getElementById('scopeWrap'),
+  searchbar: document.getElementById('searchbar'),
+  searchSummary: document.getElementById('searchSummary'),
+  searchExit: document.getElementById('searchExit'),
+  indexbar: document.getElementById('indexbar'),
+  indexText: document.getElementById('indexText'),
+  indexAction: document.getElementById('indexAction'),
+  indexDismiss: document.getElementById('indexDismiss'),
   quicklook: document.getElementById('quicklook'),
   quicklookBody: document.getElementById('quicklookBody'),
   quicklookName: document.getElementById('quicklookName'),
@@ -43,14 +52,25 @@ const el = {
 /** Column view is the default: it is the view that defines Finder. */
 const state = {
   view: 'column',
-  columns: [], // [{ path, items, selectedName, error }]
+  columns: [], // [{ path, items, selectedName }] — one entry per Miller column
   filter: '',
   selected: null, // { name, isDirectory, kind, path }
   activeSidebar: null,
   // ON by default. A preview nobody can find is not a feature: the first version only
   // opened it on a shortcut, so the owner saw no previews at all.
   previewOpen: true,
-  quickLookOpen: false
+  quickLookOpen: false,
+
+  // Search. `searchText` is non-empty only while results are being shown; the folder
+  // listing and the results never share the content area.
+  searchText: '',
+  searchScope: 'everywhere',
+  searchResults: [],
+  searchTotal: 0,
+  searchBusy: false,
+
+  // Index coverage, as reported by the last scan.
+  index: { known: false, running: false, files: 0, folders: 0, elapsedMs: 0, finishedAt: null, current: null }
 }
 
 let backStack = []
@@ -175,13 +195,15 @@ function sortItems(items) {
 // ---------------------------------------------------------------------------
 
 function render() {
-  if (state.view === 'column') renderColumns()
+  if (state.searchText) renderSearchResults()
+  else if (state.view === 'column') renderColumns()
   else if (state.view === 'list') renderList()
   else renderIcons()
   renderStatus()
   renderNavButtons()
   renderBreadcrumb()
   renderPreview()
+  renderSearchBar()
 }
 
 function renderNavButtons() {
@@ -285,6 +307,223 @@ function buildRow(item, { showMeta = false } = {}) {
 
   return row
 }
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+/** Results are a flat list of files from anywhere in the index, so they get their own view. */
+function renderSearchResults() {
+  el.content.className = 'content content-list content-results'
+  el.content.replaceChildren()
+
+  if (state.searchBusy) {
+    const busy = document.createElement('p')
+    busy.className = 'hint'
+    busy.textContent = 'Searching…'
+    el.content.append(busy)
+    return
+  }
+
+  if (state.searchResults.length === 0) {
+    const empty = document.createElement('p')
+    empty.className = 'hint'
+    empty.textContent = state.index.known
+      ? `Nothing matches “${state.searchText}”.`
+      : 'Nothing matches yet — the index has not been built. Use “Build Index”.'
+    el.content.append(empty)
+    return
+  }
+
+  const header = document.createElement('div')
+  header.className = 'list-header'
+  header.innerHTML =
+    '<span class="col-name">Name</span><span class="col-kind">Matched</span><span class="col-size">Size</span><span class="col-date">Date Modified</span>'
+  el.content.append(header)
+
+  for (const item of state.searchResults) {
+    const row = document.createElement('div')
+    row.className = 'row row-result'
+    row.dataset.name = item.name
+    row.dataset.path = item.path
+    row.dataset.kind = item.kind || ''
+    row.dataset.dir = ''
+    row.tabIndex = 0
+
+    // The enclosing folder, because a search result with no location is not actionable.
+    const folder = item.path.slice(0, Math.max(0, item.path.length - item.name.length - 1))
+
+    const art = document.createElement('span')
+    art.className = 'row-icon'
+    art.innerHTML = iconFor(item)
+
+    const name = document.createElement('span')
+    name.className = 'col-name'
+    name.textContent = item.name
+
+    const where = document.createElement('span')
+    where.className = 'row-where'
+    where.textContent = folder
+    where.title = item.path
+
+    const matched = document.createElement('span')
+    matched.className = 'col-kind'
+    matched.textContent = item.matched === 'name' ? 'Name' : 'Contents'
+
+    const size = document.createElement('span')
+    size.className = 'col-size'
+    size.textContent = item.size == null ? '—' : formatSize(item.size)
+
+    const date = document.createElement('span')
+    date.className = 'col-date'
+    date.textContent = formatDate(item.modifiedAt)
+
+    name.append(where)
+    row.append(art, name, matched, size, date)
+
+    if (state.selected?.path === item.path) {
+      row.classList.add('is-selected')
+      row.setAttribute('aria-selected', 'true')
+    }
+    el.content.append(row)
+  }
+}
+
+/** The bar above the results: what was searched, and the way back. */
+function renderSearchBar() {
+  const showing = state.searchText !== ''
+  el.searchbar.hidden = !showing
+  el.scopeWrap.hidden = !showing
+
+  if (!showing) return
+  const where = state.searchScope === 'folder' ? `in ${baseName(activePath()) || 'this folder'}` : 'everywhere'
+  const count = state.searchTotal
+  el.searchSummary.textContent = state.searchBusy
+    ? `Searching ${where}…`
+    : `${count} ${count === 1 ? 'result' : 'results'} for “${state.searchText}” ${where}`
+}
+
+/** Run the search and show the results. Debounced by the caller. */
+async function runSearch() {
+  const text = el.search.value.trim()
+  state.searchText = text
+  state.searchScope = el.scope.value
+
+  if (text === '') {
+    state.searchResults = []
+    state.searchTotal = 0
+    state.selected = null
+    render()
+    return
+  }
+
+  state.searchBusy = true
+  render()
+
+  try {
+    const result = await window.finder.search({
+      text,
+      scope: state.searchScope,
+      folder: state.searchScope === 'folder' ? activePath() : null
+    })
+    state.searchResults = result.ok ? result.results : []
+    state.searchTotal = result.ok ? result.total : 0
+    state.searchError = result.ok ? null : result.error
+  } catch (error) {
+    state.searchResults = []
+    state.searchTotal = 0
+    state.searchError = String(error)
+  } finally {
+    state.searchBusy = false
+    render()
+  }
+}
+
+/** Leave the results and go back to the folder listing. */
+function exitSearch() {
+  el.search.value = ''
+  el.searchClear.hidden = true
+  state.searchText = ''
+  state.searchResults = []
+  state.searchTotal = 0
+  state.selected = null
+  render()
+}
+
+// ---------------------------------------------------------------------------
+// Index coverage
+// ---------------------------------------------------------------------------
+
+/** Always say what the index covers: a search that silently knows part of the disk is a trap. */
+function renderIndexBar() {
+  const index = state.index
+
+  if (index.running) {
+    el.indexbar.hidden = false
+    el.indexbar.classList.add('is-running')
+    el.indexText.textContent =
+      `Indexing… ${index.files.toLocaleString()} files in ${index.folders.toLocaleString()} folders` +
+      (index.current ? ` · ${index.current}` : '')
+    el.indexAction.textContent = 'Stop'
+    el.indexDismiss.hidden = true
+    return
+  }
+
+  el.indexbar.classList.remove('is-running')
+  el.indexAction.textContent = 'Build Index'
+  el.indexDismiss.hidden = false
+
+  if (!index.known) {
+    el.indexbar.hidden = false
+    el.indexText.textContent = 'Search inside files needs an index. Building it reads file names first, then contents.'
+    return
+  }
+
+  if (state.indexDismissed) {
+    el.indexbar.hidden = true
+    return
+  }
+
+  el.indexbar.hidden = false
+  const minutes = Math.max(1, Math.round(index.elapsedMs / 60000))
+  el.indexText.textContent =
+    `Index covers ${index.files.toLocaleString()} files · ${index.contentRead?.toLocaleString() ?? 0} with contents read · built in ${minutes} min`
+}
+
+async function refreshIndexStatus() {
+  try {
+    const status = await window.finder.indexStatus()
+    state.index = {
+      ...state.index,
+      known: !!status.stats,
+      running: !!status.running,
+      files: status.stats?.files ?? status.files ?? 0,
+      folders: status.stats?.folders ?? status.folders ?? 0,
+      contentRead: status.stats?.contentRead ?? 0,
+      elapsedMs: status.stats?.elapsedMs ?? 0
+    }
+  } catch {
+    /* the banner is advisory; a failure here must not stop the app */
+  }
+  renderIndexBar()
+}
+
+async function startIndexing() {
+  state.indexDismissed = false
+  state.index.running = true
+  renderIndexBar()
+  try {
+    await window.finder.buildIndex()
+  } catch {
+    /* the scan reports its own failures through progress */
+  }
+  await refreshIndexStatus()
+  if (state.searchText) await runSearch()
+}
+
+// ---------------------------------------------------------------------------
+// Body rendering
+// ---------------------------------------------------------------------------
 
 function renderColumns() {
   el.content.className = 'content content-columns'
@@ -969,7 +1208,10 @@ const MENUS = {
       { label: 'Show Preview', accel: 'Ctrl+I', run: () => setPreviewOpen(!state.previewOpen) },
       { label: 'Quick Look', accel: 'Space', run: openQuickLook },
       { separator: true },
-      { label: 'Search This Folder', accel: 'Ctrl+F', run: () => { el.search.focus(); el.search.select() } }
+      { label: 'Search', accel: 'Ctrl+F', run: () => { el.search.focus(); el.search.select() } },
+      { label: 'Back to Folder', accel: 'Esc', run: exitSearch },
+      { separator: true },
+      { label: 'Build Search Index…', run: startIndexing }
     ]
   },
   go: {
@@ -1105,7 +1347,8 @@ function showShortcuts() {
     ['F2', 'Rename'],
     ['Ctrl+Shift+N', 'New Folder'],
     ['Delete', 'Move to Recycle Bin'],
-    ['Ctrl+F', 'Search this folder'],
+    ['Ctrl+F', 'Search'],
+    ['Esc', 'Back to the folder'],
     ['Ctrl+I', 'Show or hide the preview'],
     ['Ctrl+1 / 2 / 3', 'Columns / List / Icons'],
     ['Backspace', 'Back'],
@@ -1175,6 +1418,20 @@ document.addEventListener('click', (event) => {
 el.content.addEventListener('click', (event) => {
   const target = event.target.closest('.row, .icon-cell')
   if (!target) return
+
+  // A search result carries its own full path and lives in no column, so it is
+  // selected directly rather than through a column index.
+  if (target.classList.contains('row-result')) {
+    state.selected = {
+      name: target.dataset.name,
+      path: target.dataset.path,
+      isDirectory: false,
+      kind: target.dataset.kind
+    }
+    render()
+    return
+  }
+
   const pane = target.closest('.column')
   const index = pane ? Number(pane.dataset.index) : state.columns.length - 1
   selectInColumn(index, target.dataset.name)
@@ -1183,6 +1440,14 @@ el.content.addEventListener('click', (event) => {
 el.content.addEventListener('dblclick', async (event) => {
   const target = event.target.closest('.row, .icon-cell')
   if (!target) return
+
+  // Opening a result must open THAT file where it lives, not a same-named file in
+  // the folder that happens to be on screen.
+  if (target.classList.contains('row-result')) {
+    await window.finder.openWithDefault(target.dataset.path)
+    return
+  }
+
   const name = target.dataset.name
   const isDirectory = target.dataset.dir === '1'
   const path = await window.finder.joinPath(activePath(), name)
@@ -1214,21 +1479,48 @@ el.back.addEventListener('click', goBack)
 el.forward.addEventListener('click', goForward)
 el.up.addEventListener('click', goUp)
 
-/** Clear the folder filter and put the search box back to rest. */
+/** Clear the search and go back to the folder listing. */
 function clearSearch() {
-  el.search.value = ''
-  state.filter = ''
-  el.searchClear.hidden = true
-  render()
+  exitSearch()
 }
 
+// Searching reads the index, so it is debounced: typing must not fire a query per key.
+let searchTimer = null
 el.search.addEventListener('input', () => {
-  state.filter = el.search.value
-  el.searchClear.hidden = state.filter === ''
-  render()
+  el.searchClear.hidden = el.search.value === ''
+  if (searchTimer) clearTimeout(searchTimer)
+  const text = el.search.value.trim()
+  if (text === '') {
+    exitSearch()
+    return
+  }
+  searchTimer = setTimeout(() => {
+    runSearch()
+  }, 180)
 })
 
 el.searchClear.addEventListener('click', clearSearch)
+el.searchExit.addEventListener('click', clearSearch)
+el.scope.addEventListener('change', () => {
+  if (state.searchText) runSearch()
+})
+
+el.indexAction.addEventListener('click', () => {
+  if (state.index.running) window.finder.cancelIndex()
+  else startIndexing()
+})
+
+el.indexDismiss.addEventListener('click', () => {
+  state.indexDismissed = true
+  renderIndexBar()
+})
+
+// Scan progress: the numbers move while it runs, so the wait is legible.
+window.finder?.onIndexProgress?.((progress) => {
+  state.index = { ...state.index, ...progress, running: !progress.done && !progress.cancelled, known: true }
+  if (progress.done) state.index.running = false
+  renderIndexBar()
+})
 
 el.search.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') clearSearch()
@@ -1352,4 +1644,8 @@ document.addEventListener('keydown', async (event) => {
 
   renderSidebar()
   showColumnError(state.columns[0])
+
+  // Search state comes from the last scan, so the app can say whether searching
+  // inside files will find anything before the user tries it.
+  await refreshIndexStatus()
 })()

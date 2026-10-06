@@ -74,6 +74,8 @@ STUB = """
 const TREE = __TREE__;
 const SIDEBAR = __SIDEBAR__;
 const PREVIEWS = __PREVIEWS__;
+const SEARCH_RECORDS = __SEARCH_RECORDS__;
+const INDEX_STATUS = __INDEX_STATUS__;
 const SEP = (p) => (p.includes('\\\\') ? '\\\\' : '/');
 window.finder = {
   async listDirectory(path) {
@@ -105,7 +107,38 @@ window.finder = {
   },
   async fileOperation() { return { ok: true }; },
   async revealInExplorer() { return { ok: true }; },
-  async openWithDefault() { return { ok: true }; }
+  async openWithDefault() { return { ok: true }; },
+  async indexStatus() { return INDEX_STATUS; },
+  async buildIndex() { return { ok: true }; },
+  async cancelIndex() { return { ok: true }; },
+  onIndexProgress() { return () => {}; },
+  async listTags() { return {}; },
+  async tagItem() { return { ok: true }; },
+  async untagItem() { return { ok: true }; },
+  async search(request) {
+    const q = (request && request.text ? request.text : '').toLowerCase().trim();
+    if (!q) return { ok: true, results: [], total: 0, scanned: 0 };
+    const terms = q.split(/\\s+/).filter(Boolean);
+    const out = [];
+    for (const record of SEARCH_RECORDS) {
+      if (request.scope === 'folder' && request.folder) {
+        const prefix = request.folder.toLowerCase().replace(/[\\\\/]+$/, '') + '\\\\';
+        if (!record.path.toLowerCase().startsWith(prefix)) continue;
+      }
+      const name = record.name.toLowerCase();
+      const content = (record.content || '').toLowerCase();
+      const nameHit = terms.every((t) => name.includes(t));
+      const contentHit = !nameHit && terms.every((t) => content.includes(t));
+      if (!nameHit && !contentHit) continue;
+      out.push({
+        path: record.path, name: record.name, size: record.size,
+        modifiedAt: record.modifiedAt, kind: record.kind,
+        matched: nameHit ? 'name' : 'content'
+      });
+    }
+    out.sort((a, b) => (a.matched === b.matched ? 0 : a.matched === 'name' ? -1 : 1));
+    return { ok: true, results: out, total: out.length, scanned: SEARCH_RECORDS.length };
+  }
 };
 // ---- end stub ----
 """
@@ -113,6 +146,41 @@ window.finder = {
 
 def main():
     out_path = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else "preview.html")
+
+    # Search fixtures: one name hit, one content-only hit, one that matches neither.
+    search_records = [
+        {
+            "path": "C:\\Users\\dustin\\Videos\\shot-list-final.mp4",
+            "name": "shot-list-final.mp4",
+            "size": 1048576,
+            "modifiedAt": 1759700000000,
+            "kind": "video",
+            "content": "",
+        },
+        {
+            "path": "C:\\Users\\dustin\\Documents\\meeting.md",
+            "name": "meeting.md",
+            "size": 2048,
+            "modifiedAt": 1759600000000,
+            "kind": "text",
+            # "shot list" appears only INSIDE this file.
+            "content": "we reviewed the shot list and agreed on the schedule",
+        },
+        {
+            "path": "C:\\Users\\dustin\\Documents\\budget-2026.xlsx",
+            "name": "budget-2026.xlsx",
+            "size": 40960,
+            "modifiedAt": 1759500000000,
+            "kind": "spreadsheet",
+            "content": "quarterly figures",
+        },
+    ]
+
+    index_status = {
+        "ok": True,
+        "running": False,
+        "stats": {"files": 3, "folders": 2, "contentRead": 2, "elapsedMs": 4200, "finishedAt": 1759700000000},
+    }
 
     tree = {path: to_items(rows) for path, rows in sample_tree().items()}
 
@@ -189,6 +257,8 @@ def main():
         STUB.replace("__TREE__", json.dumps(tree))
         .replace("__SIDEBAR__", json.dumps(sidebar))
         .replace("__PREVIEWS__", json.dumps(previews))
+        .replace("__SEARCH_RECORDS__", json.dumps(search_records))
+        .replace("__INDEX_STATUS__", json.dumps(index_status))
     )
 
     # The app's CSP forbids inline style/script — correct for the app, fatal for this

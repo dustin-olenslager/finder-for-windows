@@ -18,7 +18,7 @@ entry to `completed-features.md`.
 
 | # | Item | Area | Initiative | Plan doc | Status | Next step |
 |---|------|------|------------|----------|--------|-----------|
-| 1 | Build the Finder experience: the shell (sidebar / content / toolbar), selection and keyboard grammar, file operations with undo, the four views, previews, tags, and search with the content index | app | Finder for Windows — the app | `app/foundation/plan.md` | **M5 shipped** | M1–M5 are on `main` and released as `v0.3.0` (shell, column view, previews, Quick Look, keyboard grammar, file operations). Next: **M7 — search and the content index** (tags, M5's remainder, and undo ride with it), then M6 (native bulk enumeration / 100k-file folders) and M8 (packaging polish). |
+| 1 | Build the Finder experience: the shell (sidebar / content / toolbar), selection and keyboard grammar, file operations with undo, the four views, previews, tags, and search with the content index | app | Finder for Windows — the app | `app/foundation/plan.md` | **M7 shipped** | M1–M7 are on `main`; `v0.4.0` carries the discoverable preview pane, the menu bar and Quick Look, and `v0.5.0` carries search with the content index (two-pass scan, Everywhere / This Folder scope, an index bar that states its coverage). Next: **M6 — native bulk enumeration** for 100k-file folders (the current reader stats each entry in turn, which is fine at 10k and slow at 200k), then **M8 — packaging polish** (signed build, file-type associations), then the tags UI (the store and its tests are already in `src/application/tags.js`). |
 
 **Status vocabulary:** `Not started` · `In progress — milestone N of M` · `Blocked — <on what>` ·
 `In review` · `Done — archiving`.

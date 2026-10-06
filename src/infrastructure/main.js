@@ -17,9 +17,14 @@ const { listDirectory } = require('../application/list-directory')
 const { getSidebar } = require('../application/get-sidebar')
 const { getPreview } = require('../application/get-preview')
 const { performFileOperation } = require('../application/file-operations')
+const { createIndexBuilder } = require('../application/build-index')
+const { searchIndex } = require('../application/search-index')
+const { createTagService } = require('../application/tags')
 const { createFsDirectoryReader } = require('../adapters/fs-directory-reader')
 const { createFsFileReader } = require('../adapters/fs-file-reader')
 const { createFsFileOperations } = require('../adapters/fs-file-operations')
+const { createFsIndexWalker } = require('../adapters/fs-index-walker')
+const { createJsonIndexStore } = require('../adapters/json-index-store')
 const { createElectronKnownFolders } = require('../adapters/electron-known-folders')
 const { createWindowsDrives } = require('../adapters/windows-drives')
 const { normalizePath, parentOf, joinPath, segments } = require('../domain/paths')
@@ -53,6 +58,13 @@ function createContainer() {
   })
   const drives = createWindowsDrives({ exec, fsModule: fs })
 
+  // Search. The index is a derived artifact: it is rebuilt from the disk at any time
+  // and is never the only copy of anything.
+  const store = createJsonIndexStore({ dataDir: app.getPath('userData') })
+  const indexBuilder = createIndexBuilder({ walker: createFsIndexWalker() })
+  const tags = createTagService({ store })
+  let lastScan = null
+
   return {
     // Every path is normalized before it reaches a port: "C:" becomes "C:\", which
     // is the difference between listing the drive root and listing whatever folder
@@ -63,13 +75,59 @@ function createContainer() {
 
     // Path arithmetic is a domain concern, but the renderer cannot require the domain
     // layer — it has no Node access. These three channels are the renderer's only way
-    // to build or walk a path, which keeps "C:" handling in exactly one place.
+    // to build or walk a path, which keeps "C:\" handling in exactly one place.
     joinPath: (dirPath, name) => joinPath(dirPath, name),
     parentPath: (dirPath) => parentOf(dirPath),
     pathSegments: (dirPath) => segments(dirPath),
 
     getPreview: (filePath, name) => getPreview({ fileReader }, filePath, name),
-    performFileOperation: (request) => performFileOperation({ fileOperations }, request)
+    performFileOperation: (request) => performFileOperation({ fileOperations }, request),
+
+    // ---- search -----------------------------------------------------------
+    search: (request) => searchIndex({ store }, request ?? {}),
+
+    indexStatus: async () => {
+      const { stats } = await store.read()
+      return { ok: true, lastScan, stats: stats ?? null, running: lastScan?.running ?? false }
+    },
+
+    /** Walk every fixed drive. Progress is pushed to the renderer as it goes. */
+    buildIndex: async (send) => {
+      const roots = await drives.list().then(
+        (list) => (list.drives ?? list ?? []).filter((d) => d.isReady !== false).map((d) => d.path),
+        () => []
+      )
+      const usable = roots.length > 0 ? roots : [normalizePath('C:\\') ?? 'C:\\']
+      lastScan = { running: true, startedAt: Date.now(), roots: usable }
+
+      const state = await store.readState()
+      const result = await indexBuilder.run(usable, {
+        exclusions: new Set(state.exclusions ?? []),
+        onProgress: (progress) => {
+          lastScan = { ...lastScan, ...progress }
+          if (typeof send === 'function') send(progress)
+        }
+      })
+
+      await store.write(result.records, result.stats)
+      lastScan = { ...lastScan, running: false, done: true, ...result.stats }
+
+      // Tags whose file is gone are dropped, so the store cannot grow forever.
+      const existing = new Set(result.records.map((r) => r.path.toLowerCase()))
+      const pruned = await tags.prune(existing)
+
+      return { ok: true, stats: result.stats, pruned }
+    },
+
+    cancelIndex: () => {
+      indexBuilder.cancel()
+      return { ok: true }
+    },
+
+    // ---- tags -------------------------------------------------------------
+    listTags: () => tags.listAll(),
+    tagItem: async (record, tagName) => tags.assign(record, tagName),
+    untagItem: async (record, tagName) => tags.remove(record, tagName)
   }
 }
 
@@ -117,6 +175,20 @@ app.whenReady().then(() => {
   ipcMain.handle('path-segments', (_event, dirPath) => container.pathSegments(dirPath))
   ipcMain.handle('get-preview', (_event, filePath, name) => container.getPreview(filePath, name))
   ipcMain.handle('file-operation', (_event, request) => container.performFileOperation(request))
+
+  // Search. The scan pushes progress to the window that asked for it, so the UI can
+  // show coverage while it runs instead of a spinner with no information in it.
+  ipcMain.handle('search', (_event, request) => container.search(request))
+  ipcMain.handle('index-status', () => container.indexStatus())
+  ipcMain.handle('build-index', (event) =>
+    container.buildIndex((progress) => {
+      if (!event.sender.isDestroyed()) event.sender.send('index-progress', progress)
+    })
+  )
+  ipcMain.handle('cancel-index', () => container.cancelIndex())
+  ipcMain.handle('list-tags', () => container.listTags())
+  ipcMain.handle('tag-item', (_event, record, tagName) => container.tagItem(record, tagName))
+  ipcMain.handle('untag-item', (_event, record, tagName) => container.untagItem(record, tagName))
   ipcMain.handle('reveal-in-explorer', (_event, target) => {
     shell.showItemInFolder(target)
     return { ok: true }
