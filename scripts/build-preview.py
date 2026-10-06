@@ -115,6 +115,14 @@ window.finder = {
     return { ok: true, mode: 'system', kind: 'other', extension: '', note: 'No preview for this file type.' };
   },
   async fileOperation() { return { ok: true }; },
+  // The real app copies through Electron's clipboard module. The harness records what
+  // was copied so a test can assert the VALUE, not just that a toast appeared.
+  async copyText(text) {
+    const value = String(text ?? '');
+    if (value === '') return { ok: false, error: 'Nothing to copy.' };
+    window.__copied = value;
+    return { ok: true, value: window.__copied };
+  },
   async revealInExplorer() { return { ok: true }; },
   async openWithDefault() { return { ok: true }; },
   async indexStatus() { return INDEX_STATUS; },

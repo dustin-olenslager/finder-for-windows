@@ -218,7 +218,8 @@ function renderNavButtons() {
   const path = activePath()
   el.up.disabled = !path || !canGoUp(path)
   el.title.textContent = state.columns.length ? baseName(path) || path : 'Finder for Windows'
-  el.statusPath.textContent = path || ''
+  // The status-bar path is owned by renderStatus, which points it at the SELECTION.
+  // Setting it here too made the two disagree, and this one ran last.
 }
 
 function baseName(path) {
@@ -257,6 +258,15 @@ function renderStatus() {
     parts.push(`selected: ${formatSize(state.selected.size)}`)
   }
   el.statusCount.textContent = parts.join(' · ')
+
+  // The path readout follows the SELECTION, not just the folder: when a file is picked
+  // the thing people want to copy is that file's path, not the folder they are standing
+  // in. Clicking it copies — see copyPath.
+  const selectedPath = state.selected?.path
+  el.statusPath.textContent = selectedPath || activePath() || ''
+  el.statusPath.title = selectedPath ? 'Click to copy this path' : 'Click to copy this path'
+  el.statusPath.dataset.copy = el.statusPath.textContent
+  el.statusPath.classList.toggle('is-copyable', Boolean(el.statusPath.textContent))
 }
 
 /** One row inside a column or a list. */
@@ -712,9 +722,9 @@ async function renderPreview() {
 function buildInfoBlock(item = {}, preview = {}) {
   const rows = []
 
-  const add = (label, value) => {
+  const add = (label, value, { copy = false } = {}) => {
     if (value === null || value === undefined || value === '') return
-    rows.push([label, String(value)])
+    rows.push([label, String(value), copy])
   }
 
   // Pixel dimensions come from the rendered image itself (see measureImage), so they
@@ -722,7 +732,10 @@ function buildInfoBlock(item = {}, preview = {}) {
   add('Kind', formatKind(item))
   if (typeof item.size === 'number') add('Size', formatSize(item.size))
   if (item.size === null) add('Size', 'Unknown')
-  add('Where', item.path ? item.path.slice(0, item.path.lastIndexOf('\\')) : null)
+  add('Where', item.path ? item.path.slice(0, item.path.lastIndexOf('\\')) : null, { copy: true })
+  // The full path, spelled out and copyable: this is the row the owner asked for, and
+  // hiding it behind the folder row would make the obvious thing hard to find.
+  add('Path', item.path, { copy: true })
   add('Created', formatDate(item.createdAt))
   add('Modified', formatDate(item.modifiedAt))
   if (preview.truncated) add('Shown', 'First part of the file only')
@@ -731,12 +744,19 @@ function buildInfoBlock(item = {}, preview = {}) {
 
   const block = document.createElement('dl')
   block.className = 'info-block'
-  for (const [label, value] of rows) {
+  for (const [label, value, copy] of rows) {
     const dt = document.createElement('dt')
     dt.textContent = label
     const dd = document.createElement('dd')
     dd.textContent = value
     dd.title = value
+    // A full path is too long to read in a narrow pane, and the moment you want it is
+    // the moment you want to paste it somewhere — so it is one click, not a selection.
+    if (copy) {
+      dd.classList.add('is-copyable')
+      dd.title = `${value}\n\nClick to copy`
+      dd.addEventListener('click', () => copyPath(value, { what: label }))
+    }
     block.append(dt, dd)
   }
   return block
@@ -1282,6 +1302,67 @@ function showToast(message) {
   setTimeout(() => toast.remove(), 3100)
 }
 
+/**
+ * Copy a path to the clipboard, and SAY SO.
+ *
+ * The confirmation matters more than the copy: the clipboard is invisible, so without
+ * a message the user cannot tell whether it worked and will paste to find out. Copying
+ * always reports, including when it fails, because a silent failure here is
+ * indistinguishable from a silent success.
+ */
+async function copyPath(text, { what = 'Path' } = {}) {
+  const value = String(text ?? '')
+  if (value === '') {
+    showToast('Nothing to copy.')
+    return { ok: false }
+  }
+
+  try {
+    // Prefer the main process (Electron's clipboard module): it works on a file:// page
+    // and needs no permission. The browser API is the fallback for the test harness and
+    // any context without the bridge.
+    let copied = false
+    if (window.finder?.copyText) {
+      const result = await window.finder.copyText(value)
+      copied = Boolean(result?.ok)
+    } else if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value)
+      copied = true
+    }
+
+    if (!copied) {
+      showToast('Could not copy to the clipboard.')
+      return { ok: false }
+    }
+
+    // Show the tail of a long path: the user needs to know WHICH one was copied, and a
+    // 120-character path in a toast is unreadable.
+    const short = value.length > 48 ? `…${value.slice(-45)}` : value
+    showToast(`${what} copied — ${short}`)
+    return { ok: true, value }
+  } catch (error) {
+    showToast('Could not copy to the clipboard.')
+    return { ok: false, error: String(error) }
+  }
+}
+
+/** Copy the selected item's path, or the current folder's when nothing is selected. */
+async function copySelectedPath() {
+  const target = state.selected?.path || activePath()
+  const isFile = Boolean(state.selected?.path)
+  return copyPath(target, { what: isFile ? 'Path' : 'Folder path' })
+}
+
+/** Copy just the name, which is what you want when naming a file elsewhere. */
+async function copySelectedName() {
+  const name = state.selected?.name
+  if (!name) {
+    showToast('Select an item first.')
+    return { ok: false }
+  }
+  return copyPath(name, { what: 'Name' })
+}
+
 // ---------------------------------------------------------------------------
 // Menu bar
 // ---------------------------------------------------------------------------
@@ -1294,6 +1375,9 @@ const MENUS = {
       { label: 'New Folder', accel: 'Ctrl+Shift+N', run: createFolder },
       { label: 'Rename…', accel: 'F2', run: renameSelected },
       { label: 'Move to Recycle Bin', accel: 'Delete', run: trashSelected },
+      { separator: true },
+      { label: 'Copy Path', accel: 'Ctrl+Shift+C', run: copySelectedPath },
+      { label: 'Copy Name', run: copySelectedName },
       { separator: true },
       { label: 'Open', accel: 'Enter', run: openSelected },
       { label: 'Open in Windows Explorer', run: revealSelected }
@@ -1458,6 +1542,7 @@ function showShortcuts() {
     ['Ctrl+1 / 2 / 3', 'Columns / List / Icons'],
     ['Ctrl+= / Ctrl+-', 'Larger / smaller interface'],
     ['Ctrl+0', 'Actual size (100%)'],
+    ['Ctrl+Shift+C', 'Copy the selected item’s path'],
     ['Backspace', 'Back'],
     ['Alt+← / →', 'Back / Forward'],
     ['Alt+↑', 'Enclosing folder']
@@ -1517,6 +1602,133 @@ for (const button of document.querySelectorAll('.menubar-item')) {
 document.addEventListener('click', (event) => {
   if (openMenu && !openMenu.contains(event.target)) closeMenu()
 })
+
+// ---------------------------------------------------------------------------
+// Context menus
+// ---------------------------------------------------------------------------
+
+/**
+ * The items for a given context. Kept beside MENUS because it is the same idea: a named
+ * list of commands with their shortcuts, so the two can never drift apart in wording.
+ *
+ * Every entry names the SAME function the menu bar and the keyboard use. A context menu
+ * that reimplements a command is how two behaviours get out of sync.
+ */
+function contextItemsFor(kind) {
+  const hasSelection = Boolean(state.selected)
+
+  if (kind === 'item') {
+    const isFolder = Boolean(state.selected?.isDirectory)
+    return [
+      { label: 'Open', accel: 'Enter', run: openSelected },
+      { label: 'Open in Windows Explorer', run: revealSelected },
+      { separator: true },
+      { label: 'Quick Look', accel: 'Space', run: openQuickLook },
+      { label: 'Show Preview', accel: 'Ctrl+I', run: () => setPreviewOpen(!state.previewOpen) },
+      { separator: true },
+      { label: 'Copy Path', accel: 'Ctrl+Shift+C', run: copySelectedPath },
+      { label: 'Copy Name', run: copySelectedName },
+      { separator: true },
+      { label: 'Rename…', accel: 'F2', run: renameSelected },
+      // A folder cannot be renamed away while you are standing in it, and this app has
+      // no recursive delete yet, so the honest thing is not to offer it.
+      isFolder ? null : { label: 'Move to Recycle Bin', accel: 'Delete', run: trashSelected }
+    ].filter(Boolean)
+  }
+
+  // Empty space in the folder listing.
+  return [
+    { label: 'New Folder', accel: 'Ctrl+Shift+N', run: createFolder },
+    { separator: true },
+    { label: 'Paste', accel: 'Ctrl+V', disabled: true, note: 'Coming soon' },
+    { separator: true },
+    { label: 'View as Columns', accel: 'Ctrl+1', run: () => setView('column') },
+    { label: 'View as List', accel: 'Ctrl+2', run: () => setView('list') },
+    { label: 'View as Icons', accel: 'Ctrl+3', run: () => setView('icon') },
+    { separator: true },
+    { label: 'Show Preview', accel: 'Ctrl+I', run: () => setPreviewOpen(!state.previewOpen) },
+    { label: 'Larger', accel: 'Ctrl+=', run: () => zoomBy(1) },
+    { label: 'Smaller', accel: 'Ctrl+-', run: () => zoomBy(-1) },
+    { separator: true },
+    { label: 'Copy Folder Path', accel: 'Ctrl+Shift+C', run: copySelectedPath, disabled: hasSelection }
+  ]
+}
+
+/** Where a context menu should appear, kept inside the window. */
+function placePanel(panel, x, y) {
+  const margin = 6
+  panel.style.left = '0px'
+  panel.style.top = '0px'
+  const box = panel.getBoundingClientRect()
+  const left = Math.max(margin, Math.min(x, window.innerWidth - box.width - margin))
+  const top = Math.max(margin, Math.min(y, window.innerHeight - box.height - margin))
+  panel.style.left = `${Math.round(left)}px`
+  panel.style.top = `${Math.round(top)}px`
+}
+
+/**
+ * Open a context menu at the pointer.
+ *
+ * @param {MouseEvent} event
+ * @param {'item'|'background'} kind
+ */
+function openContextMenu(event, kind) {
+  closeMenu()
+  const items = contextItemsFor(kind)
+
+  const panel = document.createElement('div')
+  panel.className = 'menu-panel menu-context'
+  panel.dataset.menu = `context-${kind}`
+  panel.setAttribute('role', 'menu')
+
+  for (const entry of items) {
+    if (entry.separator) {
+      const line = document.createElement('div')
+      line.className = 'menu-separator'
+      panel.append(line)
+      continue
+    }
+
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'menu-entry'
+    button.setAttribute('role', 'menuitem')
+
+    const label = document.createElement('span')
+    label.textContent = entry.label
+    button.append(label)
+
+    if (entry.accel) {
+      const accel = document.createElement('span')
+      accel.className = 'menu-accel'
+      accel.textContent = entry.accel
+      button.append(accel)
+    }
+
+    if (entry.disabled) {
+      // A greyed entry that explains itself beats a missing one: the user learns the
+      // feature exists and what it is called.
+      button.disabled = true
+      button.title = entry.note || 'Not available yet'
+    } else {
+      button.addEventListener('click', async () => {
+        closeMenu()
+        await entry.run()
+      })
+    }
+
+    panel.append(button)
+  }
+
+  // Appended before measuring, or the panel has no size to fit against the window.
+  document.body.append(panel)
+  placePanel(panel, event.clientX, event.clientY)
+  openMenu = panel
+
+  // Focus the first live entry so the keyboard works immediately, as a native menu does.
+  const first = panel.querySelector('.menu-entry:not([disabled])')
+  if (first) first.focus()
+}
 
 // ---------------------------------------------------------------------------
 // Interface size
@@ -1585,6 +1797,47 @@ function zoomReset() {
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
+
+el.content.addEventListener('contextmenu', async (event) => {
+  const target = event.target.closest('.row, .icon-cell')
+  if (!target) return
+  event.preventDefault()
+
+  // Right-clicking an item that is not selected SELECTS it first. Without this the menu
+  // acts on whatever was selected before, which is the single most jarring thing a
+  // context menu can do.
+  const name = target.dataset.name
+  if (target.classList.contains('row-result')) {
+    state.selected = {
+      name,
+      path: target.dataset.path,
+      isDirectory: false,
+      kind: target.dataset.kind
+    }
+    render()
+  } else {
+    const pane = target.closest('.column')
+    const index = pane ? Number(pane.dataset.index) : state.columns.length - 1
+    if (state.columns[index]?.selectedName !== name) await selectInColumn(index, name)
+  }
+
+  openContextMenu(event, 'item')
+})
+
+el.content.addEventListener('contextmenu', (event) => {
+  if (event.target.closest('.row, .icon-cell')) return
+  event.preventDefault()
+  openContextMenu(event, 'background')
+})
+
+// The sidebar gets the same treatment: right-clicking a favorite is how people expect
+// to act on it, even if the set of commands is short.
+el.sidebar.addEventListener('contextmenu', (event) => {
+  const target = event.target.closest('.sidebar-item')
+  if (!target) return
+  event.preventDefault()
+  openContextMenu(event, 'background')
+})
 
 el.content.addEventListener('click', (event) => {
   const target = event.target.closest('.row, .icon-cell')
@@ -1689,6 +1942,10 @@ el.indexDismiss.addEventListener('click', () => {
 el.zoomIn.addEventListener('click', () => zoomBy(1))
 el.zoomOut.addEventListener('click', () => zoomBy(-1))
 
+// Click the path readout to copy it. The whole point is that this is one click, not a
+// menu, so it works on the status bar text itself.
+el.statusPath.addEventListener('click', () => copySelectedPath())
+
 // Scan progress: the numbers move while it runs, so the wait is legible.
 window.finder?.onIndexProgress?.((progress) => {
   state.index = { ...state.index, ...progress, running: !progress.done && !progress.cancelled, known: true }
@@ -1731,6 +1988,25 @@ for (const button of document.querySelectorAll('.seg')) {
 document.addEventListener('keydown', async (event) => {
   // The modal owns the keyboard while it is open.
   if (document.querySelector('.modal')) return
+
+  // An open context menu owns the keyboard: arrows move, Enter runs, Escape closes.
+  if (openMenu?.classList.contains('menu-context')) {
+    const entries = [...openMenu.querySelectorAll('.menu-entry:not([disabled])')]
+    const current = entries.indexOf(document.activeElement)
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeMenu()
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      const step = event.key === 'ArrowDown' ? 1 : -1
+      const next = (current + step + entries.length) % entries.length
+      entries[next]?.focus()
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      document.activeElement?.click()
+    }
+    return
+  }
 
   // Quick Look first: space opens it, and any of the usual keys close it.
   if (state.quickLookOpen) {
@@ -1792,6 +2068,11 @@ document.addEventListener('keydown', async (event) => {
   } else if (modifier && event.key === '0') {
     event.preventDefault()
     zoomReset()
+  } else if (modifier && event.shiftKey && event.key.toLowerCase() === 'c') {
+    // Ctrl+Shift+C is the Windows convention for "copy the path" (Ctrl+C is reserved
+    // for copying the file itself, which is coming with multi-select).
+    event.preventDefault()
+    copySelectedPath()
   } else if (modifier && event.key === 'f') {
     event.preventDefault()
     el.search.focus()

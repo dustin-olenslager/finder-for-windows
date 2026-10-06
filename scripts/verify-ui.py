@@ -18,7 +18,13 @@ def state(pg):
         selected: document.querySelector('.row.is-selected')?.dataset.name || null,
         status: document.getElementById('statusCount')?.textContent,
         title: document.getElementById('folderTitle')?.textContent,
-        path: document.getElementById('statusPath')?.textContent,
+        // The status-bar path follows the SELECTION, so navigation is asserted from the
+        // last breadcrumb's own data-path, which always describes the folder being viewed.
+        path: (() => {
+            const crumbs = [...document.querySelectorAll('#breadcrumb .crumb')];
+            return crumbs.length ? crumbs[crumbs.length - 1].dataset.path : null;
+        })(),
+        barPath: document.getElementById('statusPath')?.textContent,
         upDisabled: document.getElementById('up')?.disabled,
         backDisabled: document.getElementById('back')?.disabled
     })""")
@@ -402,6 +408,118 @@ with sync_playwright() as p:
     pg.wait_for_timeout(300)
     reset = pg.evaluate("() => document.getElementById('zoomValue').textContent")
     check("Ctrl+0 returns to actual size", reset == "100%", reset)
+
+    # --- copying the selected item's path is one click, and it really copies ---
+    pg.click('.column[data-index="0"] .row[data-name="logo.png"]')
+    pg.wait_for_timeout(600)
+
+    # The path readout must follow the SELECTION, not the folder being viewed.
+    bar = pg.evaluate(
+        """() => ({
+            text: document.getElementById('statusPath').textContent,
+            copyable: document.getElementById('statusPath').classList.contains('is-copyable'),
+            cursor: getComputedStyle(document.getElementById('statusPath')).cursor
+        })"""
+    )
+    check("the status bar shows the selected file's path", bar["text"].endswith("logo.png"), bar["text"])
+    check("the status-bar path looks clickable", bar["copyable"] and bar["cursor"] == "pointer", str(bar))
+
+    # Click it, then read back what was copied. Asserting the toast appeared would pass
+    # even if nothing were copied, so the VALUE is checked.
+    pg.click("#statusPath")
+    pg.wait_for_timeout(400)
+    clip = pg.evaluate("() => window.__copied || ''")
+    check("clicking the path puts it on the clipboard", clip.endswith("logo.png"), clip)
+    check("copying says so, because the clipboard is invisible", pg.evaluate("() => !!document.querySelector('.toast')") is True)
+
+    # The preview's own Path row copies too.
+    pg.evaluate("() => { window.__copied = null }")
+    pg.click(".info-block dd.is-copyable")
+    pg.wait_for_timeout(400)
+    info_clip = pg.evaluate("() => window.__copied || ''")
+    check("the preview's copyable row copies its value", info_clip != "" and "dustin" in info_clip, info_clip)
+
+    # Ctrl+Shift+C is the keyboard route.
+    pg.evaluate("() => { window.__copied = null }")
+    pg.keyboard.press("Control+Shift+C")
+    pg.wait_for_timeout(400)
+    key_clip = pg.evaluate("() => window.__copied || ''")
+    check("Ctrl+Shift+C copies the path", key_clip.endswith("logo.png"), key_clip)
+
+    # Copying an empty value must not claim success.
+    empty = pg.evaluate("() => window.finder.copyText('')")
+    check("copying nothing reports failure, not a false success", empty["ok"] is False, str(empty))
+
+    # With nothing selected, the folder path is what gets copied.
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(300)
+
+    # --- right-click gives options ---
+    pg.click('.column[data-index="0"] .row[data-name="readme.txt"]')
+    pg.wait_for_timeout(500)
+    pg.click('.column[data-index="0"] .row[data-name="notes.md"]', button="right")
+    pg.wait_for_timeout(500)
+    ctx = pg.evaluate(
+        """() => {
+            const panel = document.querySelector('.menu-context');
+            if (!panel) return null;
+            const box = panel.getBoundingClientRect();
+            return {
+                labels: [...panel.querySelectorAll('.menu-entry')].map(b => b.textContent),
+                disabled: [...panel.querySelectorAll('.menu-entry[disabled]')].map(b => b.textContent),
+                insideViewport: box.left >= 0 && box.top >= 0 &&
+                    box.right <= window.innerWidth && box.bottom <= window.innerHeight,
+                selected: document.querySelector('.row.is-selected')?.dataset.name || null,
+                hasFocus: !!document.activeElement?.closest('.menu-context')
+            };
+        }"""
+    )
+    check("right-clicking an item opens a context menu", ctx is not None, str(ctx))
+    check("the context menu lists the real commands", any("Copy Path" in l for l in ctx["labels"]) and any("Rename" in l for l in ctx["labels"]), str(ctx["labels"]))
+    check("the context menu shows the shortcuts", any("Ctrl+Shift+C" in l for l in ctx["labels"]), str(ctx["labels"]))
+    check("right-click SELECTS the item under the pointer", ctx["selected"] == "notes.md", str(ctx["selected"]))
+    check("the context menu stays inside the window", ctx["insideViewport"], str(ctx))
+    check("the context menu takes focus so the keyboard works", ctx["hasFocus"])
+
+    # Escape closes it.
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(300)
+    check("Escape closes the context menu", pg.evaluate("() => !document.querySelector('.menu-context')"))
+
+    # A disabled entry must say why rather than silently doing nothing.
+    pg.click('.column[data-index="0"]', position={"x": 120, "y": 400}, button="right")
+    pg.wait_for_timeout(400)
+    bg = pg.evaluate(
+        """() => {
+            const panel = document.querySelector('.menu-context');
+            if (!panel) return null;
+            const paste = [...panel.querySelectorAll('.menu-entry')].find(b => b.textContent.includes('Paste'));
+            return {
+                labels: [...panel.querySelectorAll('.menu-entry')].map(b => b.textContent),
+                pasteDisabled: paste ? paste.disabled : null,
+                pasteNote: paste ? paste.title : null
+            };
+        }"""
+    )
+    check("right-clicking empty space gives the folder commands", bg is not None and any("New Folder" in l for l in bg["labels"]), str(bg))
+    check("an unavailable command is greyed and explains itself", bg["pasteDisabled"] is True and "Coming soon" in (bg["pasteNote"] or ""), str(bg))
+
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(200)
+
+    # Running a command from the context menu must actually run it.
+    pg.click('.column[data-index="0"] .row[data-name="logo.png"]', button="right")
+    pg.wait_for_timeout(400)
+    pg.evaluate("() => { window.__copied = null }")
+    pg.evaluate(
+        """() => {
+            const panel = document.querySelector('.menu-context');
+            [...panel.querySelectorAll('.menu-entry')].find(b => b.textContent.includes('Copy Path')).click();
+        }"""
+    )
+    pg.wait_for_timeout(400)
+    ran = pg.evaluate("() => window.__copied || ''")
+    check("a context-menu command really runs", ran.endswith("logo.png"), ran)
 
     # Recomputed at the very end, after everything above has moved the UI around.
     leaked = hidden_but_visible()

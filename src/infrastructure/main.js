@@ -8,7 +8,7 @@
  * it may import Electron, Node's fs, or any vendor module.
  */
 
-const { app, BrowserWindow, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, clipboard } = require('electron')
 const { execFile } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -189,6 +189,15 @@ app.whenReady().then(() => {
   ipcMain.handle('list-tags', () => container.listTags())
   ipcMain.handle('tag-item', (_event, record, tagName) => container.tagItem(record, tagName))
   ipcMain.handle('untag-item', (_event, record, tagName) => container.untagItem(record, tagName))
+
+  // Clipboard. Electron's module is the canonical route and needs no permission grant.
+  ipcMain.handle('copy-text', (_event, text) => {
+    const value = typeof text === 'string' ? text : String(text ?? '')
+    if (value === '') return { ok: false, error: 'Nothing to copy.' }
+    clipboard.writeText(value)
+    // Read back rather than assume: the renderer reports success, and it must be true.
+    return { ok: clipboard.readText() === value, value }
+  })
   ipcMain.handle('reveal-in-explorer', (_event, target) => {
     shell.showItemInFolder(target)
     return { ok: true }

@@ -347,6 +347,22 @@ body {
 
 .menu-separator { height: 1px; margin: 4px 6px; background: var(--line); }
 
+/* A context menu: same panel, positioned at the pointer, and it must never be clipped
+   by the window edge (placePanel keeps it inside). */
+.menu-context {
+  min-width: 250px;
+  z-index: 70;
+}
+
+.menu-entry:disabled {
+  color: var(--fg-muted);
+  opacity: 0.55;
+  cursor: default;
+}
+
+.menu-entry:disabled:hover { background: transparent; color: var(--fg-muted); }
+.menu-entry:focus-visible { background: var(--bg-hover); outline: none; }
+
 /* ------------------------------------------------------------ search clear */
 
 .search-clear {
@@ -500,6 +516,23 @@ body {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+
+/* A copyable value says so before you click it: the hover highlight and the pointer are
+   the only affordance available on a value that is otherwise plain text. */
+.info-block dd.is-copyable {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin-left: -4px;
+}
+
+.info-block dd.is-copyable:hover { background: var(--bg-hover); color: var(--fg); }
+.info-block dd.is-copyable:active { background: var(--bg-selected); color: #fff; }
+
+/* The status-bar path: click to copy, and it looks like it. */
+.status-path.is-copyable { cursor: pointer; border-radius: 4px; padding: 1px 5px; }
+.status-path.is-copyable:hover { background: var(--bg-hover); color: var(--fg); }
+.status-path.is-copyable:active { background: var(--bg-selected); color: #fff; }
 
 /* -------------------------------------------------------------------- body */
 

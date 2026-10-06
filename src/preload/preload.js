@@ -42,6 +42,17 @@ contextBridge.exposeInMainWorld('finder', {
   /** create-folder | rename | trash. Resolves to { ok } or { ok:false, error }. */
   fileOperation: (request) => ipcRenderer.invoke('file-operation', request),
 
+  // ---- clipboard ----------------------------------------------------------
+
+  /**
+   * Copy text to the system clipboard.
+   *
+   * This goes through the main process because Electron's clipboard module is the
+   * canonical route: it needs no permission grant and works on a file:// page, where
+   * the browser clipboard API is an opaque origin with no permission to grant.
+   */
+  copyText: (text) => ipcRenderer.invoke('copy-text', text),
+
   /** Escape hatch: show the item in Windows Explorer. */
   revealInExplorer: (target) => ipcRenderer.invoke('reveal-in-explorer', target),
 
