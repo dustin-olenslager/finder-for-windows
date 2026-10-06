@@ -70,8 +70,15 @@ jobs:
       # ESLint over the source. This is not a style gate — it is the check that catches a
       # reference to something that does not exist, which is how an undefined
       # `transferFiles` in the composition root reached a release candidate.
+      #
+      # The kit's own workflow installs no dependencies, so the packages are fetched here
+      # at the PINNED versions. `npx eslint` on its own pulls whatever is current and then
+      # fails to resolve the config's imports — the gate must not depend on the latest
+      # release of anything.
       - name: Lint (eslint)
-        run: npx eslint src test scripts
+        run: |
+          npm install --no-save --no-audit --no-fund eslint@^9.15.0 @eslint/js@^9.15.0
+          ./node_modules/.bin/eslint src test scripts
 
       - name: Lint (shellcheck)
         run: |
