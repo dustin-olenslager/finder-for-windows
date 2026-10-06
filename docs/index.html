@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>finder-for-windows — 4 decisions</title>
+<style>
+  :root {
+    --bg: #f6f6f7;
+    --panel: #ffffff;
+    --fg: #1d1d1f;
+    --muted: #6e6e73;
+    --line: #e3e3e5;
+    --line-strong: #d2d2d6;
+    --accent: #0071e3;
+    --accent-soft: rgba(0, 113, 227, 0.08);
+    --accent-line: rgba(0, 113, 227, 0.45);
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 6px 20px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e;
+      --panel: #242426;
+      --fg: #f5f5f7;
+      --muted: #98989d;
+      --line: #35353a;
+      --line-strong: #45454b;
+      --accent: #0a84ff;
+      --accent-soft: rgba(10, 132, 255, 0.14);
+      --accent-line: rgba(10, 132, 255, 0.55);
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 26px rgba(0,0,0,.34);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); }
+  body {
+    margin: 0;
+    padding: 40px 22px 60px;
+    color: var(--fg);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  header { margin-bottom: 30px; }
+  h1 { font-size: 27px; line-height: 1.2; margin: 0 0 8px; font-weight: 660; letter-spacing: -0.022em; }
+  .lede { color: var(--muted); font-size: 14.5px; margin: 0; }
+  .lede code {
+    font: 12.5px/1.4 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 5px;
+  }
+  .progress {
+    display: flex; align-items: center; gap: 9px; margin: 18px 0 0;
+    font-size: 13px; color: var(--muted);
+  }
+  .bar { flex: 1; height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0%; background: var(--accent); border-radius: 3px; transition: width .25s ease; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 20px 20px 18px; margin-bottom: 16px; box-shadow: var(--shadow);
+  }
+  .qhead { display: flex; gap: 11px; align-items: baseline; margin-bottom: 3px; }
+  .num {
+    flex: 0 0 auto; font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--accent); padding-top: 3px;
+  }
+  .qtext { font-size: 16.5px; font-weight: 620; letter-spacing: -0.011em; margin: 0; }
+  .qwhy { color: var(--muted); font-size: 13px; margin: 0 0 15px 30px; }
+  .opt {
+    display: flex; gap: 12px; align-items: flex-start; width: 100%; text-align: left;
+    padding: 12px 14px; margin: 0 0 8px; border: 1px solid var(--line-strong);
+    border-radius: 10px; background: transparent; color: inherit; font: inherit;
+    cursor: pointer; transition: border-color .13s, background .13s, transform .13s;
+  }
+  .opt:last-child { margin-bottom: 0; }
+  .opt:hover { border-color: var(--accent-line); background: var(--accent-soft); }
+  .opt:active { transform: scale(.995); }
+  .opt[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .mark {
+    flex: 0 0 19px; height: 19px; margin-top: 1px; border: 1.5px solid var(--line-strong);
+    border-radius: 50%; display: grid; place-items: center; transition: border-color .13s;
+  }
+  .mark::after { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); transform: scale(0); transition: transform .13s; }
+  .opt[aria-pressed="true"] .mark { border-color: var(--accent); }
+  .opt[aria-pressed="true"] .mark::after { transform: scale(1); }
+  .body { flex: 1; min-width: 0; }
+  .lbl { font-weight: 560; }
+  .rec {
+    display: inline-block; margin-left: 8px; padding: 1.5px 8px; border-radius: 20px;
+    font-size: 10px; font-weight: 680; letter-spacing: .045em; text-transform: uppercase;
+    border: 1px solid var(--accent-line); color: var(--accent); vertical-align: 1.5px;
+  }
+  .note { color: var(--muted); font-size: 13px; margin-top: 3px; }
+  .bad { color: var(--muted); font-size: 13px; margin-top: 3px; font-style: italic; }
+  footer {
+    margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: 12.5px;
+  }
+  footer strong { color: var(--fg); font-weight: 600; }
+  .sent { color: var(--accent); font-weight: 560; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>finder-for-windows</h1>
+    <p class="lede">Four decisions before I write the spec. Tap one per question — your picks are recorded in <code>docs/agents/decisions/</code> and stay here until you change them.</p>
+    <div class="progress"><span id="ptext">0 of 4 chosen</span><span class="bar"><i id="pbar"></i></span></div>
+  </header>
+
+  <section class="card" data-q="D-0001">
+    <div class="qhead"><span class="num">01</span><h2 class="qtext">What kind of Finder clone?</h2></div>
+    <p class="qwhy">Windows has no cross-application metadata store, so a literal copy is impossible. This picks the target.</p>
+    <button class="opt" aria-pressed="true" data-hermes-send="Decision D-0001 = Behavioral clone — record it and continue.">
+      <span class="mark"></span>
+      <span class="body"><span class="lbl">Behavioral clone</span><span class="rec">Recommended</span>
+        <div class="note">Same views, shortcuts, tags, sidebar and Quick Look behavior. About 90% of Finder is reachable on Windows.</div></span>
+    </button>
+    <button class="opt" aria-pressed="false" data-hermes-send="Decision D-0001 = Metadata clone — record it and continue.">
+      <span class="mark"></span>
+      <span class="body"><span class="lbl">Metadata clone</span>
+        <div class="bad">Tags and view state visible to other apps and to Windows itself — not possible on Windows.</div></span>
+    </button>
+    <button class="opt" aria-pressed="false" data-hermes-send="Decision D-0001 = Skin clone — record it and continue.">
+      <span class="mark"></span>
+      <span class="body"><span class="lbl">Skin clone</span>
+        <div class="bad">Looks identical, doesn't behave identically. The SME panel rejected this.</div></span>
+    </button>
+  </section>
+
+  <section class="card" data-q="D-0002">
+    <div class="qhead"><span class="num">02</span><h2 class="qtext">Which view opens by default on a new folder?</h2></div>
+    <p class="qwhy">Every folder still remembers its own last-used view — this is only the first-ever default.</p>
+    <button class="opt" aria-pressed="true" data-hermes-send="Decision D-0002 = Column (Miller) view default — record it and continue.">
+      <span class="mark"></span>
+      <span class="body"><span class="lbl">Column (Miller) view</span><span class="rec">Recommended</span>
+        <div class="note">The Finder-defining power view, and the hardest one to retrofit later.</div></span>
+    </button>
+    <button class="opt" aria-pressed="false" data-hermes-send="Decision D-0002 = Icon view default — record it and continue.">
+      <span class="mark"></span><span class="body"><span class="lbl">Icon view</span></span>
+    </button>
+    <button class="opt" aria-pressed="false" data-hermes-send="Decision D-0002 = List view default — record it and continue.">
+      <span class="mark"></span><span class="body"><span class="lbl">List view</span></span>
+    </button>
+    <button class="opt" aria-pressed="false" data-hermes-send="Decision D-0002 = Gallery view default — record it and continue.">
+      <span class="mark"></span><span class="body"><span class="lbl">Gallery view</span>
+        <div class="note">Big preview plus a filmstrip.</div></span>
+    </button>
+  </section>
+
+  <section class="card" data-q="D-0003">
+    <div class="qhead"><span class="num">03</span><h2 class="qtext">How much goes in v1?</h2></div>
+    <p class="qwhy">Search is the part that scales the effort — a real content index is a project of its own.</p>
+    <button class="opt" aria-pressed="true" data-hermes-send="Decision D-0003 = Fast core first — record it and continue.">
+      <span class="mark"></span>
+      <span class="body"><span class="lbl">Fast core first</span><span class="rec">Recommended</span>
+        <div class="note">All four views, Quick Look, tags, sidebar, the full keyboard grammar, per-folder memory. Search covers name, kind and date.</div></span>
+    </button>
+    <button class="opt" aria-pressed="false" data-hermes-send="Decision D-0003 = Fast core plus full content search — record it and continue.">
+      <span class="mark"></span>
+      <span class="body"><span class="lbl">Fast core + full content search</span>
+        <div class="note">Adds a self-built indexing engine. Materially bigger; much later first build.</div></span>
+    </button>
+    <button class="opt" aria-pressed="false" data-hermes-send="Decision D-0003 = Minimal MVP — record it and continue.">
+      <span class="mark"></span>
+      <span class="body"><span class="lbl">Minimal MVP</span>
+        <div class="note">Icon and list views plus basic file operations only.</div></span>
+    </button>
+  </section>
+
+  <section class="card" data-q="D-0004">
+    <div class="qhead"><span class="num">04</span><h2 class="qtext">Where do your tags live?</h2></div>
+    <p class="qwhy">Finder stores tags in the filesystem itself. Windows has no equivalent, so this is a real trade-off.</p>
+    <button class="opt" aria-pressed="true" data-hermes-send="Decision D-0004 = App-local tag database — record it and continue.">
+      <span class="mark"></span>
+      <span class="body"><span class="lbl">App-local tag database</span><span class="rec">Recommended</span>
+        <div class="note">A sidecar SQLite file keyed by drive serial and file ID. Works on every drive including USB and network shares. Tags are visible only inside this app.</div></span>
+    </button>
+    <button class="opt" aria-pressed="false" data-hermes-send="Decision D-0004 = Write tags into NTFS metadata — record it and continue.">
+      <span class="mark"></span>
+      <span class="body"><span class="lbl">Write into NTFS file metadata</span>
+        <div class="note">Windows Explorer would see them — but they are lost on USB and network copies, and antivirus flags the writes.</div></span>
+    </button>
+    <button class="opt" aria-pressed="false" data-hermes-send="Decision D-0004 = Both, with an export action — record it and continue.">
+      <span class="mark"></span>
+      <span class="body"><span class="lbl">Both</span>
+        <div class="note">The app database is the source of truth, plus a one-click "export tags to Windows" action.</div></span>
+    </button>
+  </section>
+
+  <footer>
+    Pre-selected options are the SME panel's recommendation. <strong>Nothing gets built until all four are chosen</strong> — then I write the spec, the wireframe and the plan for your approval.
+    <span id="sentmsg" class="sent"></span>
+  </footer>
+</div>
+
+<script>
+  var chosen = 0, total = document.querySelectorAll('.card').length;
+
+  function update() {
+    var n = document.querySelectorAll('.opt[aria-pressed="true"]').length;
+    chosen = n;
+    document.getElementById('ptext').textContent = n + ' of ' + total + ' chosen';
+    document.getElementById('pbar').style.width = (n / total * 100) + '%';
+  }
+
+  document.querySelectorAll('.card').forEach(function (card) {
+    card.querySelectorAll('.opt').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        card.querySelectorAll('.opt').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); });
+        btn.setAttribute('aria-pressed', 'true');
+        update();
+        var msg = document.getElementById('sentmsg');
+        msg.textContent = ' Sent to Hermes.';
+        setTimeout(function () { msg.textContent = ''; }, 2600);
+        if (window.hermes && window.hermes.send) window.hermes.send(btn.dataset.hermesSend);
+      });
+    });
+  });
+
+  update();
+</script>
+</body>
+</html>
