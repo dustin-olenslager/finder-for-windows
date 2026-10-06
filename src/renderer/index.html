@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data: file:; media-src file:; frame-src file:;">
   <title>Finder for Windows</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -46,17 +46,44 @@
     </div>
   </header>
 
+  <nav class="breadcrumb" id="breadcrumb" aria-label="Path"></nav>
+
   <div class="body">
     <nav class="sidebar" id="sidebar" aria-label="Sidebar"></nav>
     <main class="content" id="content" aria-live="polite">
       <p class="hint">Loading…</p>
     </main>
+    <aside class="preview" id="preview" aria-label="Preview">
+      <header class="preview-head">
+        <div class="preview-titles">
+          <span class="preview-name" id="previewName"></span>
+          <span class="preview-meta" id="previewMeta"></span>
+        </div>
+        <button type="button" class="icon-btn" id="previewClose" title="Hide preview" aria-label="Hide preview">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+      </header>
+      <div class="preview-body" id="previewBody"></div>
+    </aside>
   </div>
 
   <footer class="statusbar">
     <span class="status-count" id="statusCount"></span>
     <span class="status-path" id="statusPath"></span>
   </footer>
+
+  <!-- Quick Look: the spacebar overlay -->
+  <div class="quicklook" id="quicklook" hidden>
+    <div class="quicklook-card" role="dialog" aria-modal="true" aria-label="Quick Look">
+      <header class="quicklook-head">
+        <div class="preview-titles">
+          <span class="preview-name" id="quicklookName"></span>
+          <span class="preview-meta" id="quicklookMeta"></span>
+        </div>
+      </header>
+      <div class="quicklook-body" id="quicklookBody"></div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>

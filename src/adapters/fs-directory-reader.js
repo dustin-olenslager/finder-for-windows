@@ -18,6 +18,7 @@
 
 const fs = require('node:fs/promises')
 const path = require('node:path')
+const { kindOf } = require('../domain/file-kind')
 
 // Windows file attributes. Present on the stat object on Windows only; on other
 // platforms these stay 0 and the corresponding checks fall through.
@@ -55,7 +56,8 @@ async function toFileItem(entry, dirPath) {
       name: entry.name,
       isDirectory: entry.isDirectory(),
       size: null,
-      mtime: null,
+      modifiedAt: null,
+      kind: entry.isDirectory() ? 'folder' : kindOf(entry.name),
       isHidden: isHidden(0, entry.name),
       isCloudPlaceholder: false,
       metadataUnavailable: true
@@ -63,11 +65,15 @@ async function toFileItem(entry, dirPath) {
   }
 
   const attributes = stat.attributes ?? 0
+  const isDirectory = stat.isDirectory()
   return {
     name: entry.name,
-    isDirectory: stat.isDirectory(),
-    size: stat.isDirectory() ? null : stat.size,
-    mtime: stat.mtimeMs,
+    isDirectory,
+    size: isDirectory ? null : stat.size,
+    // `modifiedAt` (milliseconds) is the name the renderer reads; keep the field name
+    // identical on every path out of this adapter so a column can never go blank.
+    modifiedAt: stat.mtimeMs,
+    kind: isDirectory ? 'folder' : kindOf(entry.name),
     isHidden: isHidden(attributes, entry.name),
     isCloudPlaceholder: isCloudPlaceholder(attributes),
     metadataUnavailable: false

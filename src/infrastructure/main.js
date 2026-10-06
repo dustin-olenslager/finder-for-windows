@@ -15,7 +15,11 @@ const path = require('node:path')
 
 const { listDirectory } = require('../application/list-directory')
 const { getSidebar } = require('../application/get-sidebar')
+const { getPreview } = require('../application/get-preview')
+const { performFileOperation } = require('../application/file-operations')
 const { createFsDirectoryReader } = require('../adapters/fs-directory-reader')
+const { createFsFileReader } = require('../adapters/fs-file-reader')
+const { createFsFileOperations } = require('../adapters/fs-file-operations')
 const { createElectronKnownFolders } = require('../adapters/electron-known-folders')
 const { createWindowsDrives } = require('../adapters/windows-drives')
 const { normalizePath, parentOf, joinPath, segments } = require('../domain/paths')
@@ -33,6 +37,10 @@ function exec(command, args, { timeout = 4000 } = {}) {
 /** Build the wired-up use cases for this process. */
 function createContainer() {
   const directoryReader = createFsDirectoryReader()
+  const fileReader = createFsFileReader()
+  // Electron's shell.trashItem is the only supported route to the Windows Recycle Bin,
+  // so it is injected here rather than imported by the adapter (which stays Electron-free).
+  const fileOperations = createFsFileOperations({ trash: (p) => shell.trashItem(p) })
   const knownFolders = createElectronKnownFolders({
     app,
     exists: (p) => {
@@ -58,7 +66,10 @@ function createContainer() {
     // to build or walk a path, which keeps "C:" handling in exactly one place.
     joinPath: (dirPath, name) => joinPath(dirPath, name),
     parentPath: (dirPath) => parentOf(dirPath),
-    pathSegments: (dirPath) => segments(dirPath)
+    pathSegments: (dirPath) => segments(dirPath),
+
+    getPreview: (filePath, name) => getPreview({ fileReader }, filePath, name),
+    performFileOperation: (request) => performFileOperation({ fileOperations }, request)
   }
 }
 
@@ -104,6 +115,8 @@ app.whenReady().then(() => {
   ipcMain.handle('join-path', (_event, dirPath, name) => container.joinPath(dirPath, name))
   ipcMain.handle('parent-path', (_event, dirPath) => container.parentPath(dirPath))
   ipcMain.handle('path-segments', (_event, dirPath) => container.pathSegments(dirPath))
+  ipcMain.handle('get-preview', (_event, filePath, name) => container.getPreview(filePath, name))
+  ipcMain.handle('file-operation', (_event, request) => container.performFileOperation(request))
   ipcMain.handle('reveal-in-explorer', (_event, target) => {
     shell.showItemInFolder(target)
     return { ok: true }

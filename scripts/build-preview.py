@@ -22,33 +22,34 @@ def sample_tree():
     """A believable C:\\Users\\dustin, so the preview shows real shapes and sizes."""
     return {
         "C:\\Users\\dustin": [
-            ("Desktop", True, None, "2026-10-04T09:12:00"),
-            ("Documents", True, None, "2026-10-05T18:40:00"),
-            ("Downloads", True, None, "2026-10-06T07:55:00"),
-            ("Pictures", True, None, "2026-09-28T14:02:00"),
-            ("Projects", True, None, "2026-10-06T06:30:00"),
-            ("Videos", True, None, "2026-09-19T11:20:00"),
-            ("budget-2026.xlsx", False, 48_213, "2026-10-01T16:11:00"),
-            ("notes.md", False, 3_912, "2026-10-06T08:04:00"),
-            ("readme.txt", False, 611, "2026-09-30T20:45:00"),
-            ("shot-list.pdf", False, 2_884_019, "2026-10-03T13:37:00"),
+            ("Desktop", True, None, "2026-10-04T09:12:00", "folder"),
+            ("Documents", True, None, "2026-10-05T18:40:00", "folder"),
+            ("Downloads", True, None, "2026-10-06T07:55:00", "folder"),
+            ("Pictures", True, None, "2026-09-28T14:02:00", "folder"),
+            ("Projects", True, None, "2026-10-06T06:30:00", "folder"),
+            ("Videos", True, None, "2026-09-19T11:20:00", "folder"),
+            ("budget-2026.xlsx", False, 48_213, "2026-10-01T16:11:00", "spreadsheet"),
+            ("logo.png", False, 184_320, "2026-10-02T12:00:00", "image"),
+            ("notes.md", False, 3_912, "2026-10-06T08:04:00", "text"),
+            ("readme.txt", False, 611, "2026-09-30T20:45:00", "text"),
+            ("shot-list.pdf", False, 2_884_019, "2026-10-03T13:37:00", "pdf"),
         ],
         "C:\\Users\\dustin\\Projects": [
-            ("finder-for-windows", True, None, "2026-10-06T06:30:00"),
-            ("shoot-archive", True, None, "2026-10-05T22:15:00"),
-            ("archive", True, None, "2026-08-14T10:00:00"),
-            ("cleanup.ps1", False, 1_204, "2026-09-22T19:03:00"),
+            ("finder-for-windows", True, None, "2026-10-06T06:30:00", "folder"),
+            ("shoot-archive", True, None, "2026-10-05T22:15:00", "folder"),
+            ("archive", True, None, "2026-08-14T10:00:00", "folder"),
+            ("cleanup.ps1", False, 1_204, "2026-09-22T19:03:00", "code"),
         ],
         "C:\\Users\\dustin\\Projects\\finder-for-windows": [
-            ("assets", True, None, "2026-10-05T23:59:00"),
-            ("docs", True, None, "2026-10-06T06:12:00"),
-            ("scripts", True, None, "2026-10-05T22:40:00"),
-            ("src", True, None, "2026-10-06T07:02:00"),
-            ("test", True, None, "2026-10-06T06:55:00"),
-            (".gitignore", False, 402, "2026-10-05T21:30:00"),
-            ("LICENSE", False, 1_077, "2026-10-05T21:31:00"),
-            ("README.md", False, 4_118, "2026-10-06T06:12:00"),
-            ("package.json", False, 1_240, "2026-10-06T05:48:00"),
+            ("assets", True, None, "2026-10-05T23:59:00", "folder"),
+            ("docs", True, None, "2026-10-06T06:12:00", "folder"),
+            ("scripts", True, None, "2026-10-05T22:40:00", "folder"),
+            ("src", True, None, "2026-10-06T07:02:00", "folder"),
+            ("test", True, None, "2026-10-06T06:55:00", "folder"),
+            (".gitignore", False, 402, "2026-10-05T21:30:00", "text"),
+            ("LICENSE", False, 1_077, "2026-10-05T21:31:00", "text"),
+            ("README.md", False, 4_118, "2026-10-06T06:12:00", "text"),
+            ("package.json", False, 1_240, "2026-10-06T05:48:00", "code"),
         ],
     }
 
@@ -60,10 +61,11 @@ def to_items(rows):
             "isDirectory": is_dir,
             "size": size,
             "modifiedAt": modified,
+            "kind": kind,
             "isCloudPlaceholder": False,
             "metadataUnavailable": False,
         }
-        for name, is_dir, size, modified in rows
+        for name, is_dir, size, modified, kind in rows
     ]
 
 
@@ -71,6 +73,7 @@ STUB = """
 // ---- preview stub: stands in for the preload bridge, nothing else is faked ----
 const TREE = __TREE__;
 const SIDEBAR = __SIDEBAR__;
+const PREVIEWS = __PREVIEWS__;
 const SEP = (p) => (p.includes('\\\\') ? '\\\\' : '/');
 window.finder = {
   async listDirectory(path) {
@@ -89,7 +92,18 @@ window.finder = {
     const i = t.lastIndexOf(SEP(t));
     return i > 2 ? t.slice(0, i) : null;
   },
-  async pathSegments(p) { return p.split(/[\\\\/]+/).filter(Boolean); },
+  async pathSegments(p) {
+    const parts = p.replace(/[\\\\/]+$/, '').split(/[\\\\/]+/).filter(Boolean);
+    return parts.length ? [parts[0] + '\\\\'].concat(parts.slice(1)) : [];
+  },
+  async getPreview(path, name) {
+    const key = String(name || '').toLowerCase();
+    for (const [ext, payload] of Object.entries(PREVIEWS)) {
+      if (key.endsWith('.' + ext)) return payload;
+    }
+    return { ok: true, mode: 'system', kind: 'other', extension: '', note: 'No preview for this file type.' };
+  },
+  async fileOperation() { return { ok: true }; },
   async revealInExplorer() { return { ok: true }; },
   async openWithDefault() { return { ok: true }; }
 };
@@ -129,11 +143,48 @@ def main():
         ],
     }
 
+    # Preview payloads per extension, so the pane can be exercised offline.
+    previews = {
+        "md": {
+            "ok": True,
+            "mode": "text",
+            "kind": "text",
+            "extension": "md",
+            "text": "# Finder for Windows\n\nA file manager that works like macOS Finder.\n\n## Status\n\nPre-release.\n",
+            "truncated": False,
+            "looksBinary": False,
+        },
+        "txt": {
+            "ok": True,
+            "mode": "text",
+            "kind": "text",
+            "extension": "txt",
+            "text": "Notes for the week\n------------------\n\n- Review the shot list\n- Send the invoice\n",
+            "truncated": False,
+            "looksBinary": False,
+        },
+        "json": {
+            "ok": True,
+            "mode": "text",
+            "kind": "code",
+            "extension": "json",
+            "text": '{\n  "name": "finder-for-windows",\n  "version": "0.3.0"\n}\n',
+            "truncated": False,
+            "looksBinary": False,
+        },
+        "pdf": {"ok": True, "mode": "system", "kind": "pdf", "extension": "pdf", "note": "Opens in another app."},
+        "xlsx": {"ok": True, "mode": "system", "kind": "spreadsheet", "extension": "xlsx", "note": "No preview for this file type."},
+    }
+
     html = (RENDERER / "index.html").read_text()
     css = (RENDERER / "style.css").read_text()
     js = (RENDERER / "app.js").read_text()
 
-    stub = STUB.replace("__TREE__", json.dumps(tree)).replace("__SIDEBAR__", json.dumps(sidebar))
+    stub = (
+        STUB.replace("__TREE__", json.dumps(tree))
+        .replace("__SIDEBAR__", json.dumps(sidebar))
+        .replace("__PREVIEWS__", json.dumps(previews))
+    )
 
     # The app's CSP forbids inline style/script — correct for the app, fatal for this
     # harness, which inlines the real assets into one file. Drop the meta tag here.

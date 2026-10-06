@@ -36,6 +36,12 @@ contextBridge.exposeInMainWorld('finder', {
   /** Breadcrumb segments for a path. */
   pathSegments: (dirPath) => ipcRenderer.invoke('path-segments', dirPath),
 
+  /** How an item can be previewed, and the payload for the kinds we render inline. */
+  getPreview: (filePath, name) => ipcRenderer.invoke('get-preview', filePath, name),
+
+  /** create-folder | rename | trash. Resolves to { ok } or { ok:false, error }. */
+  fileOperation: (request) => ipcRenderer.invoke('file-operation', request),
+
   /** Escape hatch: show the item in Windows Explorer. */
   revealInExplorer: (target) => ipcRenderer.invoke('reveal-in-explorer', target),
 
