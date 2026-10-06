@@ -17,3 +17,11 @@ CONVENTIONS.md
 
 # Staging dir for the existing-repo degit + /adapt-agents-setup flow
 .agents-kit-tmp/
+
+# --- Node / app ---
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+Thumbs.db

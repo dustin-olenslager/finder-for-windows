@@ -1,0 +1,68 @@
+name: build-windows
+
+# Builds the Windows installers on a Windows runner and uploads them as artifacts.
+# This is the ONLY way to produce the installer: the dev box is Linux and has no
+# wine, so electron-builder cannot cross-compile the NSIS target locally.
+#
+# Trigger: manually from the Actions tab, or on a version tag (v*).
+# The artifacts land on the run page and are downloadable without any local tooling.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }} installer
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            script: build
+          - arch: x64
+            script: build:x64
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+        continue-on-error: false
+
+      - name: Test
+        run: npm test
+
+      - name: Build the ${{ matrix.arch }} installer
+        run: npm run ${{ matrix.script }}
+        env:
+          # No signing certificate yet (D-0008): the installer is unsigned and
+          # SmartScreen shows one "Unknown publisher" warning on first run.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: List what was produced
+        shell: pwsh
+        run: Get-ChildItem -Recurse dist | Select-Object FullName, Length | Format-Table -AutoSize
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: FinderForWindows-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/*Setup*.exe
+            dist/*portable*.exe

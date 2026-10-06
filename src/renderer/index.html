@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:;">
+  <title>Finder for Windows</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- M1 skeleton: the smallest surface that proves the IPC bridge end to end.
+       The real three-region shell (sidebar / content / toolbar) is M2 and gets a
+       wireframe first. Do not grow this file into the interface. -->
+  <header class="bar">
+    <button id="back" class="btn" title="Back" aria-label="Back" disabled>‹</button>
+    <button id="up" class="btn" title="Enclosing folder" aria-label="Enclosing folder">↑</button>
+    <span id="path" class="path"></span>
+    <span id="count" class="count"></span>
+  </header>
+
+  <main id="content" class="content" aria-live="polite">
+    <p class="hint">Loading…</p>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

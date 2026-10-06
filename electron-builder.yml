@@ -1,0 +1,48 @@
+appId: com.dustinolenslager.finderforwindows
+productName: Finder for Windows
+copyright: Copyright © 2026 Dustin Olenslager
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  # NOTE: do NOT add "!node_modules/**" — electron-builder bundles production
+  # dependencies automatically and excluding them breaks the packaged app.
+  - src/**/*
+  - package.json
+  - "!**/*.map"
+
+# Windows targets. ARM64 (Snapdragon X) is primary; x64 builds from the same source.
+win:
+  target:
+    - target: nsis
+      arch:
+        - arm64
+    - target: portable
+      arch:
+        - arm64
+  # No code signing (D-0008): the installer is unsigned, so SmartScreen shows one
+  # "Unknown publisher" warning on first run.
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Finder for Windows
+  runAfterFinish: true
+  artifactName: FinderForWindows-Setup-${version}-${arch}.${ext}
+  uninstallDisplayName: Finder for Windows
+
+portable:
+  artifactName: FinderForWindows-${version}-${arch}-portable.${ext}
+
+# No native dependencies are used, so nothing is rebuilt from source.
+npmRebuild: false
+buildDependenciesFromSource: false
+
+extraMetadata:
+  main: src/infrastructure/main.js

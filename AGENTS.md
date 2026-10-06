@@ -13,6 +13,7 @@ Then: **propose before you edit**, **keep roadmap / queue / worklog current in t
 - **Clean Architecture is the premise of all code here.** Dependencies point inward only; business rules never import a framework, Electron, the filesystem, an IPC channel, or a vendor SDK; every external concern sits behind a port with its adapter at the edge; one composition root wires them.
 - **Plan before code; verify before commit.** No multi-file change without a persisted plan under `docs/agents/`; no commit without a green test / typecheck / lint run in the same session.
 - **Change approval is STRICT.** Describe the change (what, which files, why), name the layers it touches, and **wait for approval before editing** — for a one-line fix as much as for a feature. The trivial carve-out does not apply in this repo.
+  - **Owner override (2026-10-05):** the owner asked for end-to-end delivery with no pull requests — build on `main` directly and hand him an installer. Recorded in `docs/agents/architecture.md`. It relaxes only the branch-and-PR step; spec, plan, tests and gates still apply. Revert to branch + PR when he says so.
 - **The plan and worklog are never stale — and this is enforced.** Every change updates `in-progress.md` (status + Next step), appends a line to `worklog.md`, and moves the `roadmap.md` initiative when it starts or ships — in the same commit as the code. **`scripts/check-docs.sh` fails any commit that changes code but not the worklog in the same commit.**
 
 ## This project

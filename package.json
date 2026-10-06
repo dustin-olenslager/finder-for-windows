@@ -1,0 +1,32 @@
+{
+  "name": "finder-for-windows",
+  "productName": "Finder for Windows",
+  "version": "0.1.0",
+  "description": "A Windows file manager that works like macOS Finder.",
+  "main": "src/infrastructure/main.js",
+  "author": "Dustin Olenslager",
+  "license": "MIT",
+  "private": false,
+  "scripts": {
+    "start": "electron .",
+    "dev": "cross-env NODE_ENV=development electron .",
+    "build": "electron-builder --win --arm64",
+    "build:x64": "electron-builder --win --x64",
+    "dist": "electron-builder --win",
+    "test": "node --test test/*.test.js",
+    "lint": "eslint src test",
+    "typecheck": "tsc -p jsconfig.json",
+    "format": "prettier --write \"src/**/*.{js,html,css,json}\" \"test/**/*.js\""
+  },
+  "devDependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^43.2.0",
+    "electron-builder": "^24.13.3",
+    "eslint": "^9.15.0",
+    "prettier": "^3.4.0",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
