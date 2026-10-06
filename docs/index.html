@@ -111,7 +111,7 @@
   <section class="card" data-q="D-0001">
     <div class="qhead"><span class="num">01</span><h2 class="qtext">What kind of Finder clone?</h2></div>
     <p class="qwhy">Windows has no cross-application metadata store, so a literal copy is impossible. This picks the target.</p>
-    <button class="opt" aria-pressed="true" data-hermes-send="Decision D-0001 = Behavioral clone — record it and continue.">
+    <button class="opt" aria-pressed="false" data-hermes-send="Decision D-0001 = Behavioral clone — record it and continue.">
       <span class="mark"></span>
       <span class="body"><span class="lbl">Behavioral clone</span><span class="rec">Recommended</span>
         <div class="note">Same views, shortcuts, tags, sidebar and Quick Look behavior. About 90% of Finder is reachable on Windows.</div></span>
@@ -131,7 +131,7 @@
   <section class="card" data-q="D-0002">
     <div class="qhead"><span class="num">02</span><h2 class="qtext">Which view opens by default on a new folder?</h2></div>
     <p class="qwhy">Every folder still remembers its own last-used view — this is only the first-ever default.</p>
-    <button class="opt" aria-pressed="true" data-hermes-send="Decision D-0002 = Column (Miller) view default — record it and continue.">
+    <button class="opt" aria-pressed="false" data-hermes-send="Decision D-0002 = Column (Miller) view default — record it and continue.">
       <span class="mark"></span>
       <span class="body"><span class="lbl">Column (Miller) view</span><span class="rec">Recommended</span>
         <div class="note">The Finder-defining power view, and the hardest one to retrofit later.</div></span>
@@ -151,7 +151,7 @@
   <section class="card" data-q="D-0003">
     <div class="qhead"><span class="num">03</span><h2 class="qtext">How much goes in v1?</h2></div>
     <p class="qwhy">Search is the part that scales the effort — a real content index is a project of its own.</p>
-    <button class="opt" aria-pressed="true" data-hermes-send="Decision D-0003 = Fast core first — record it and continue.">
+    <button class="opt" aria-pressed="false" data-hermes-send="Decision D-0003 = Fast core first — record it and continue.">
       <span class="mark"></span>
       <span class="body"><span class="lbl">Fast core first</span><span class="rec">Recommended</span>
         <div class="note">All four views, Quick Look, tags, sidebar, the full keyboard grammar, per-folder memory. Search covers name, kind and date.</div></span>
@@ -171,7 +171,7 @@
   <section class="card" data-q="D-0004">
     <div class="qhead"><span class="num">04</span><h2 class="qtext">Where do your tags live?</h2></div>
     <p class="qwhy">Finder stores tags in the filesystem itself. Windows has no equivalent, so this is a real trade-off.</p>
-    <button class="opt" aria-pressed="true" data-hermes-send="Decision D-0004 = App-local tag database — record it and continue.">
+    <button class="opt" aria-pressed="false" data-hermes-send="Decision D-0004 = App-local tag database — record it and continue.">
       <span class="mark"></span>
       <span class="body"><span class="lbl">App-local tag database</span><span class="rec">Recommended</span>
         <div class="note">A sidecar SQLite file keyed by drive serial and file ID. Works on every drive including USB and network shares. Tags are visible only inside this app.</div></span>
@@ -189,7 +189,7 @@
   </section>
 
   <footer>
-    Pre-selected options are the SME panel's recommendation. <strong>Nothing gets built until all four are chosen</strong> — then I write the spec, the wireframe and the plan for your approval.
+    Tap the option you want in each question. Options marked <strong>Recommended</strong> are the SME panel's pick. <strong>Nothing gets built until all four are chosen</strong> — then I write the spec, the wireframe and the plan for your approval.
     <span id="sentmsg" class="sent"></span>
   </footer>
 </div>
