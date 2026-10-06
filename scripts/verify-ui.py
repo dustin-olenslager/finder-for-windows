@@ -1129,6 +1129,49 @@ with sync_playwright() as p:
     pg.keyboard.press("Escape")
     pg.wait_for_timeout(300)
 
+    # --- a new file appears without navigating away and back --------------------
+    # The reported bug: on a Google Drive virtual drive fs.watch never fires, so a new
+    # take only showed up after leaving the folder and re-entering it. The main process
+    # now also POLLS, and this proves the renderer reacts to that.
+    pg.goto(src.as_uri())
+    pg.wait_for_timeout(700)
+    pg.click('.column[data-index="0"] .row[data-name="Videos"]')
+    pg.wait_for_timeout(500)
+    before = pg.evaluate("() => [...document.querySelectorAll('.column')].pop().querySelectorAll('.row').length")
+
+    # Select something first: a live refresh must not throw the selection away.
+    pg.click('.column[data-index="1"] .row[data-name="scene-01-take-01.mp4"]')
+    pg.wait_for_timeout(250)
+    held = pg.evaluate("() => document.querySelector('.row.is-selected')?.dataset.name || null")
+
+    # A new take lands in the folder being viewed.
+    pg.evaluate("""() => window.finder.__addFile('C:\\\\Users\\\\dustin\\\\Videos', {
+        name: 'scene-01-take-05.mp4', isDirectory: false, kind: 'video', size: 4200000, modified: 1791400000000
+    })""")
+    pg.wait_for_timeout(700)
+
+    after = pg.evaluate("() => [...document.querySelectorAll('.column')].pop().querySelectorAll('.row').length")
+    check("a new file appears without leaving the folder", after == before + 1, f"{before} -> {after}")
+    names = pg.evaluate("() => [...[...document.querySelectorAll('.column')].pop().querySelectorAll('.row')].map(r => r.dataset.name)")
+    check("the new file is the one that appeared", "scene-01-take-05.mp4" in names, str(names))
+    still = pg.evaluate("() => document.querySelector('.row.is-selected')?.dataset.name || null")
+    check("a live refresh keeps the selection while adding the file", still == held, f"{held} -> {still}")
+
+    # And it lands where the SORT says, rather than being appended to the end. A file
+    # whose name sorts first is the case that proves it: appended blindly it would be
+    # last, correctly sorted it is first.
+    pg.evaluate("""() => window.finder.__addFile('C:\\\\Users\\\\dustin\\\\Videos', {
+        name: 'aaa-earliest.mp4', isDirectory: false, kind: 'video', size: 1000, modified: 1791400000000
+    })""")
+    pg.wait_for_timeout(700)
+    order = pg.evaluate("() => [...[...document.querySelectorAll('.column')].pop().querySelectorAll('.row')].map(r => r.dataset.name)")
+    # Folders sort above files by design, so the first FILE is the position that proves
+    # the sort ran — appended blindly, the new file would be last in the whole list.
+    check("a new file lands in its sorted position, not tacked on the end",
+          order[1] == "aaa-earliest.mp4", str(order))
+    check("and the folder still sorts above it", order[0] == "03_Approved", str(order))
+    check("the new file is last only if its name sorts last", order[-1] != "aaa-earliest.mp4", str(order))
+
     # Recomputed at the very end, after everything above has moved the UI around.
     leaked = hidden_but_visible()
     check("no element marked hidden is actually visible", leaked == [], str(leaked))

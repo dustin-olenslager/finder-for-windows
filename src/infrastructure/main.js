@@ -18,6 +18,7 @@ const { getSidebar } = require('../application/get-sidebar')
 const { getPreview } = require('../application/get-preview')
 const { performFileOperation } = require('../application/file-operations')
 const { transferFiles } = require('../application/transfer-files')
+const { createFolderWatcher } = require('./folder-watcher')
 const { createIndexBuilder } = require('../application/build-index')
 const { searchIndex } = require('../application/search-index')
 const { createTagService } = require('../application/tags')
@@ -130,67 +131,6 @@ function createContainer() {
     listTags: () => tags.listAll(),
     tagItem: async (record, tagName) => tags.assign(record, tagName),
     untagItem: async (record, tagName) => tags.remove(record, tagName)
-  }
-}
-
-/**
- * Watch the folders currently on screen, and tell the renderer when one changes.
- *
- * Why a small set rather than a whole-drive watcher: Windows allows only a limited
- * number of change handles, and a recursive watch of a user's drive exhausts them and
- * then silently stops reporting. Watching exactly the folders being VIEWED is the
- * smallest shape that answers the real question — "has what I am looking at changed?" —
- * and it cannot run out of handles.
- *
- * A watcher is deliberately forgiving: a folder that cannot be watched (permissions, a
- * disconnected network drive) is skipped rather than crashing the app, and the listing
- * still refreshes on demand.
- */
-function createFolderWatcher(onChange) {
-  const watchers = new Map()
-  let debounce = null
-
-  const fire = () => {
-    // Editors write a file in several steps; a single change can arrive as five events.
-    // Coalescing keeps the UI from re-listing the folder five times in a row.
-    if (debounce) clearTimeout(debounce)
-    debounce = setTimeout(() => {
-      debounce = null
-      onChange()
-    }, 250)
-  }
-
-  return {
-    /** Watch exactly this set of folders, dropping any that are no longer on screen. */
-    set(paths) {
-      const wanted = new Set((paths || []).filter(Boolean))
-      for (const [watched, watcher] of watchers) {
-        if (!wanted.has(watched)) {
-          watcher.close()
-          watchers.delete(watched)
-        }
-      }
-      for (const target of wanted) {
-        if (watchers.has(target)) continue
-        try {
-          // persistent:false so a watcher never holds the app open after the window closes.
-          const watcher = fs.watch(target, { persistent: false }, fire)
-          watcher.on('error', () => {
-            watcher.close()
-            watchers.delete(target)
-          })
-          watchers.set(target, watcher)
-        } catch {
-          // A folder that cannot be watched is not an error worth showing: the listing
-          // still refreshes by hand.
-        }
-      }
-    },
-    close() {
-      if (debounce) clearTimeout(debounce)
-      for (const watcher of watchers.values()) watcher.close()
-      watchers.clear()
-    }
   }
 }
 

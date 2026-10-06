@@ -1808,6 +1808,10 @@ async function refreshLive() {
   const selectedNames = state.columns.map((c) => c.selectedName)
   const keepLead = state.selected?.name ?? null
   const keepSelection = selectionNames()
+  // A live refresh is triggered by something the user did NOT do — another program saved
+  // a file. Jumping their scroll position to the top is how a "live" folder becomes
+  // irritating, so where each column was scrolled is captured and restored.
+  const scrollTops = [...document.querySelectorAll('.column')].map((c) => c.scrollTop)
 
   const fresh = []
   for (let index = 0; index < paths.length; index += 1) {
@@ -1821,6 +1825,11 @@ async function refreshLive() {
   state.selection = fresh.flatMap((c) => c.items).filter((i) => keepSelection.has(i.name))
   if (!lead) state.anchorName = null
   render()
+
+  const columns = [...document.querySelectorAll('.column')]
+  columns.forEach((column, index) => {
+    if (scrollTops[index] !== undefined) column.scrollTop = scrollTops[index]
+  })
 }
 
 /** Start watching the folders on screen, so a change on disk shows up on its own. */

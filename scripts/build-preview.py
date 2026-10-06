@@ -219,6 +219,15 @@ window.finder = {
     window.__watched = Array.isArray(paths) ? paths.slice() : [];
     return { ok: true, watching: window.__watched.length };
   },
+  // Add an entry to the fixture tree and tell the renderer, exactly as the main process
+  // does when a watched folder changes. A test uses this to prove a new file appears
+  // WITHOUT navigating away and back — the reported bug.
+  __addFile(path, entry) {
+    TREE[path] = TREE[path] || [];
+    TREE[path].push(entry);
+    if (typeof window.__fireFoldersChanged === 'function') window.__fireFoldersChanged();
+    return entry;
+  },
   onFoldersChanged(callback) {
     window.__fireFoldersChanged = callback;
     return () => { window.__fireFoldersChanged = null; };
