@@ -14,16 +14,20 @@ files:
   - "!**/*.map"
 
 # Windows targets. ARM64 (Snapdragon X) is primary; x64 builds from the same source.
+# No `arch:` here on purpose — the CLI flag (--arm64 / --x64) selects the
+# architecture. Pinning arch in this file overrides the CLI, which made the x64
+# job emit arm64 artifacts.
 win:
   target:
-    - target: nsis
-      arch:
-        - arm64
-    - target: portable
-      arch:
-        - arm64
+    - nsis
+    - portable
   # No code signing (D-0008): the installer is unsigned, so SmartScreen shows one
   # "Unknown publisher" warning on first run.
+
+# Never publish. electron-builder otherwise detects CI and tries to upload a
+# GitHub Release, which fails without a token and is not wanted — the workflow
+# uploads the artifacts itself.
+publish: null
 
 nsis:
   oneClick: false

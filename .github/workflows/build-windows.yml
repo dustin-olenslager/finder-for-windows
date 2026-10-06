@@ -52,6 +52,8 @@ jobs:
           # No signing certificate yet (D-0008): the installer is unsigned and
           # SmartScreen shows one "Unknown publisher" warning on first run.
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Belt and braces against electron-builder trying to publish a release.
+          GH_TOKEN: ''
 
       - name: List what was produced
         shell: pwsh
