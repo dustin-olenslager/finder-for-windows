@@ -183,6 +183,17 @@ last among the features because the index is the largest component and it is the
 
 ## Build notes
 
+> **Build note:** 2026-10-06 — **A public-repo leak, and the gate that prevents a repeat.** Production
+> naming from private work was typed into a test fixture in this public repository (`scripts/build-preview.py`,
+> added with the media-stepping work). It reached two commits, was force-pushed away, and was then found
+> **still fetchable by SHA** — a force-push rewrites visible history but GitHub keeps orphaned commits, and
+> `refs/pull/*/head` are kept permanently for every PR. The repository was therefore deleted and recreated
+> from a scrubbed history; `scripts/check-sanitize.sh` now fails the build when a private project, company,
+> host, internal IP or non-noreply address appears in any tracked file, and `npm run check:sanitize` wires it
+> up. The leak was never in an installer: `electron-builder` bundles only `src/**` and `package.json`.
+> **Lesson:** a test fixture is published content. Scrub at authoring time, and verify a history rewrite by
+> fetching the OLD SHA from the remote — not by inspecting the local tree.
+
 > **Build note:** 2026-10-05 — The plan was written after the spec, deliberately, and every `FR` was
 > mapped before any milestone was named. Two requirements changed the milestone shape: `FR-003`
 > (sidebar drag-to-move) was pulled out of the operations milestone into the shell milestone because a

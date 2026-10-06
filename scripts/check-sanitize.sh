@@ -38,7 +38,8 @@ scan() {
     | grep -viE "$ALLOW" || true)
   if [ -n "$hits" ]; then
     echo "FAIL  $label"
-    echo "$hits" | sed 's/^/      /'
+    # Indent each hit line; parameter expansion keeps this shellcheck-clean.
+    printf '      %s\n' "${hits//$'\n'/$'\n'      }"
     fail=1
   else
     echo "ok    $label"
