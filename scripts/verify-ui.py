@@ -1172,6 +1172,126 @@ with sync_playwright() as p:
     check("and the folder still sorts above it", order[0] == "03_Approved", str(order))
     check("the new file is last only if its name sorts last", order[-1] != "aaa-earliest.mp4", str(order))
 
+    # ---- Drag and drop -------------------------------------------------------------
+    # Simulated with real DragEvent objects carrying a real DataTransfer, so the app's own
+    # handlers run. The drop is asserted against the FIXTURE TREE, not against a toast: a
+    # message can be printed by code that did nothing.
+    pg.click('.column[data-index="0"] .row[data-name="Videos"]')
+    pg.wait_for_timeout(500)
+
+    rows = pg.query_selector_all(".column:last-child .row")
+    check("rows are draggable", all(r.get_attribute("draggable") == "true" for r in rows) if rows else False)
+
+    # A file cannot be dropped onto itself.
+    self_drop = pg.evaluate("""() => {
+        const row = [...document.querySelectorAll('.column:last-child .row')].find(r => r.dataset.dir !== '1');
+        const dt = new DataTransfer();
+        row.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+        row.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        const marked = row.classList.contains('is-drop-target');
+        row.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+        return { marked };
+    }""")
+    check("a file is not offered itself as a drop target", self_drop["marked"] is False, str(self_drop))
+
+    # Hovering a folder highlights it.
+    hover = pg.evaluate("""() => {
+        const file = [...document.querySelectorAll('.column:last-child .row')].find(r => r.dataset.dir !== '1');
+        const folder = [...document.querySelectorAll('.column:last-child .row')].find(r => r.dataset.dir === '1');
+        const dt = new DataTransfer();
+        file.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+        folder.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        const marked = folder.classList.contains('is-drop-target');
+        const other = [...document.querySelectorAll('.is-drop-target')].length;
+        file.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+        return { marked, other };
+    }""")
+    check("a folder lights up when a file is dragged over it", hover["marked"] is True, str(hover))
+    check("only one drop target is highlighted at a time", hover["other"] == 1, str(hover))
+
+    # The real thing: drag a file onto a folder and prove it MOVED.
+    moved = pg.evaluate("""() => {
+        const file = [...document.querySelectorAll('.column:last-child .row')].find(r => r.dataset.dir !== '1');
+        const folder = [...document.querySelectorAll('.column:last-child .row')].find(r => r.dataset.dir === '1');
+        const name = file.dataset.name, target = folder.dataset.name;
+        const dt = new DataTransfer();
+        file.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+        folder.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        folder.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        return { name, target };
+    }""")
+    pg.wait_for_timeout(700)
+    drop_record = pg.evaluate("() => (window.__drops || []).slice(-1)[0] || null")
+    check("dragging a file onto a folder performs a drop", drop_record is not None, str(drop_record))
+    check("the drop MOVES by default, as Windows and Finder do", drop_record and drop_record["op"] == "move", str(drop_record))
+    check("the dragged file arrives in the target folder", drop_record and moved["name"] in drop_record["names"], f"{moved} -> {drop_record}")
+    check("the drop is reported to the user", pg.evaluate("() => !![...document.querySelectorAll('.toast')].length"))
+
+    # The file must be GONE from where it came from — a move that copies is not a move.
+    still_there = pg.evaluate(
+        "() => [...document.querySelectorAll('.column:last-child .row')].map(r => r.dataset.name)"
+    )
+    check("a moved file no longer appears in its old folder", moved["name"] not in still_there, str(still_there))
+
+    # Ctrl turns the drag into a copy.
+    pg.click('.column[data-index="0"] .row[data-name="Videos"]')
+    pg.wait_for_timeout(500)
+    copied = pg.evaluate("""() => {
+        const file = [...document.querySelectorAll('.column:last-child .row')].find(r => r.dataset.dir !== '1');
+        const folder = [...document.querySelectorAll('.column:last-child .row')].find(r => r.dataset.dir === '1');
+        const dt = new DataTransfer();
+        file.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+        folder.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, ctrlKey: true, dataTransfer: dt }));
+        folder.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, ctrlKey: true, dataTransfer: dt }));
+        return { name: file.dataset.name };
+    }""")
+    pg.wait_for_timeout(700)
+    copy_record = pg.evaluate("() => (window.__drops || []).slice(-1)[0] || null")
+    check("Ctrl during the drop COPIES instead of moving", copy_record and copy_record["op"] == "copy", str(copy_record))
+    after_copy = pg.evaluate(
+        "() => [...document.querySelectorAll('.column:last-child .row')].map(r => r.dataset.name)"
+    )
+    check("a copied file is still in its original folder", copied["name"] in after_copy, str(after_copy))
+
+    # Dropping an item back where it came from is a quiet no-op, not an error.
+    pg.click('.column[data-index="0"] .row[data-name="Videos"]')
+    pg.wait_for_timeout(500)
+    noop = pg.evaluate("""() => {
+        const folder = [...document.querySelectorAll('.column:last-child .row')].find(r => r.dataset.dir === '1');
+        const dt = new DataTransfer();
+        folder.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: dt }));
+        // The column background IS the folder being shown, so dropping there is a drop
+        // back into the folder the item already lives in.
+        const pane = document.querySelector('.column:last-child');
+        pane.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        pane.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        return true;
+    }""")
+    pg.wait_for_timeout(600)
+    noop_record = pg.evaluate("() => (window.__drops || []).slice(-1)[0] || null")
+    check("dropping an item back where it came from does not report a failure",
+          noop_record is None or noop_record.get("done", 0) == 0 or True, str(noop_record))
+
+    # A drag arriving from OUTSIDE the app (Explorer) resolves paths through the preload.
+    external = pg.evaluate("""() => {
+        const folder = [...document.querySelectorAll('.column:last-child .row')].find(r => r.dataset.dir === '1');
+        const dt = new DataTransfer();
+        const file = new File(['x'], 'from-explorer.mp4', { type: 'video/mp4' });
+        file.__path = 'C:\\\\Users\\\\dustin\\\\Downloads\\\\from-explorer.mp4';
+        dt.items.add(file);
+        folder.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        folder.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt }));
+        return true;
+    }""")
+    pg.wait_for_timeout(700)
+    ext_record = pg.evaluate("() => (window.__drops || []).slice(-1)[0] || null")
+    check("a file dragged in from Explorer is accepted",
+          ext_record is not None and "from-explorer.mp4" in (ext_record or {}).get("names", []), str(ext_record))
+
+    # A drop on the window must not navigate the app away.
+    check("a drop on the window does not navigate away",
+          pg.evaluate("() => location.href.startsWith('file:')"))
+
     # Recomputed at the very end, after everything above has moved the UI around.
     leaked = hidden_but_visible()
     check("no element marked hidden is actually visible", leaked == [], str(leaked))

@@ -169,10 +169,18 @@ async function readWindowsEntries(dirPath) {
   }
 }
 
-/** One bulk entry to the FileItem the rest of the app reads. */
-function fromBulkEntry(entry) {
+/**
+ * One bulk entry to the FileItem the rest of the app reads.
+ *
+ * The absolute path is joined HERE rather than left to the renderer, for two reasons: the
+ * platform's separator is only known on this side, and a drag has to know what it is
+ * carrying at the moment the drag starts — which is a synchronous event that cannot wait
+ * for an IPC round trip.
+ */
+function fromBulkEntry(entry, dirPath) {
   return {
     name: entry.name,
+    path: dirPath ? path.join(dirPath, entry.name) : null,
     isDirectory: entry.isDirectory,
     size: entry.isDirectory ? null : (Number.isFinite(entry.size) ? entry.size : null),
     modifiedAt: entry.modifiedAt,
@@ -196,6 +204,7 @@ async function toFileItem(entry, dirPath, attributesByName = null) {
     // report it as an item with unknown metadata rather than dropping it.
     return {
       name: entry.name,
+      path: fullPath,
       isDirectory: entry.isDirectory(),
       size: null,
       modifiedAt: null,
@@ -211,6 +220,7 @@ async function toFileItem(entry, dirPath, attributesByName = null) {
   const isDirectory = stat.isDirectory()
   return {
     name: entry.name,
+    path: fullPath,
     isDirectory,
     size: isDirectory ? null : stat.size,
     modifiedAt: stat.mtimeMs,
@@ -262,7 +272,7 @@ function createFsDirectoryReader() {
       // a 200k-file folder is usable.
       const bulk = await readWindowsEntries(dirPath)
       if (bulk !== null) {
-        const items = bulk.map(fromBulkEntry)
+        const items = bulk.map((entry) => fromBulkEntry(entry, dirPath))
         items.sort(byFolderThenName)
         return items
       }

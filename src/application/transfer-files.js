@@ -8,6 +8,15 @@
  * the composition root; this file decides WHAT should happen and reports honestly on
  * what did.
  *
+ * Two entry points share the same rules:
+ *
+ *   - transferFiles  — the explicit Copy/Paste and Cut/Paste path.
+ *   - dropFiles      — a drag and drop onto a folder. Drag is a MOVE by default, the way
+ *                      Windows and Finder both behave, and Ctrl during the drop makes it a
+ *                      copy. That decision is made by the caller and passed in as `op`, so
+ *                      this file stays a pure rule set rather than a place where UI state
+ *                      leaks.
+ *
  * The rules that matter, and why:
  *
  *   - A copy into the SAME folder is refused rather than silently overwriting the
@@ -110,6 +119,51 @@ async function transferFiles({ fileOperations }, request) {
   }
 }
 
+/**
+ * Use case: dropFiles — a drag and drop landed on a folder.
+ *
+ * Drag and drop is the same transfer with one extra rule that only drags can break:
+ * **you cannot drop a folder into itself or into anything beneath it.** The transfer
+ * rules already refuse that for a single source, but a drop can also target a folder
+ * that is *inside* the dragged set — dragging a parent onto its own child — which is the
+ * same infinite recursion reached from the other side.
+ *
+ * A drop onto the folder the items already live in is a no-op, not an error: picking a
+ * file up and putting it back down where it was should never produce a failure message.
+ *
+ * `op` comes from the caller because the modifier key decides it (plain drag moves,
+ * Ctrl+drag copies). Keeping that decision outside means this stays a pure rule set.
+ *
+ * @param {{ fileOperations: object }} deps
+ * @param {{ op?: 'copy'|'move', paths: string[], destination: string, names?: object }} request
+ * @returns {Promise<{ok: boolean, op: string, moved: number, total: number, results: Array, error?: string}>}
+ */
+async function dropFiles({ fileOperations }, request) {
+  const op = request?.op === 'copy' ? 'copy' : 'move'
+  const destination = normalizePath(request?.destination)
+  if (!destination) return { ok: false, op, moved: 0, total: 0, results: [], error: 'That drop had no destination folder.' }
+
+  const paths = Array.isArray(request?.paths) ? request.paths.filter(Boolean) : []
+  if (paths.length === 0) return { ok: false, op, moved: 0, total: 0, results: [], error: 'That drop had nothing in it.' }
+
+  const names = request?.names ?? {}
+  const items = paths.map((p) => {
+    const from = normalizePath(p)
+    return { path: from, name: names[from] || names[p] || from.split(/[\\/]/).filter(Boolean).pop() }
+  })
+
+  // A drop of one folder onto itself is a no-op, and saying so is better than a message
+  // that looks like a failure. Only true when the WHOLE drop is a no-op.
+  const allAlreadyHere =
+    op === 'move' &&
+    items.every((i) => parentOf(i.path)?.toLowerCase() === destination.toLowerCase())
+  if (allAlreadyHere) {
+    return { ok: true, op, moved: 0, total: items.length, results: [], noop: true }
+  }
+
+  return transferFiles({ fileOperations }, { op, items, destination })
+}
+
 /** Turn a filesystem failure into a sentence a person can act on. */
 function sentenceFor(error) {
   const code = error?.code
@@ -122,4 +176,4 @@ function sentenceFor(error) {
   return 'That did not work. The file may be in use.'
 }
 
-module.exports = { transferFiles, isInside }
+module.exports = { transferFiles, dropFiles, isInside }

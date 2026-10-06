@@ -121,6 +121,203 @@ function activeColumn() {
 }
 
 // ---------------------------------------------------------------------------
+// Drag and drop
+// ---------------------------------------------------------------------------
+
+/**
+ * What is currently being dragged.
+ *
+ * A module-level value rather than `dataTransfer` state, because `dataTransfer.getData`
+ * is deliberately unreadable during `dragover` — the browser hides the payload until the
+ * drop actually happens. We need to know what is in flight while the pointer is still
+ * moving, to decide whether a folder may accept it.
+ */
+let dragState = null
+
+/** Every element currently wearing the drop-target highlight. */
+const dropTargets = new Set()
+
+function clearDropTargets() {
+  for (const node of dropTargets) node.classList.remove('is-drop-target')
+  dropTargets.clear()
+}
+
+function markDropTarget(node) {
+  if (!node || dropTargets.has(node)) return
+  clearDropTargets()
+  node.classList.add('is-drop-target')
+  dropTargets.add(node)
+}
+
+/**
+ * The folder a drop at this point should land in, or null.
+ *
+ * Resolution order matters: a folder row wins over the column behind it, and the column
+ * wins over the view background. Returns { path, node }.
+ */
+function dropDestinationAt(target) {
+  const row = target.closest?.('.row.is-dir, .icon-cell.is-dir')
+  if (row) {
+    const item = itemForNode(row)
+    if (item?.path) return { path: item.path, node: row }
+    return null
+  }
+
+  const sidebarItem = target.closest?.('.sidebar-item')
+  if (sidebarItem?.dataset.path) {
+    return { path: sidebarItem.dataset.path, node: sidebarItem }
+  }
+
+  const pane = target.closest?.('.column')
+  if (pane?.dataset.path) return { path: pane.dataset.path, node: pane }
+
+  // The background of a list or icon view is the folder being shown.
+  if (el.content.contains(target) && activePath()) {
+    return { path: activePath(), node: el.content }
+  }
+  return null
+}
+
+/** Find the item a row or icon cell was built from. */
+function itemForNode(node) {
+  const name = node.dataset.name
+  if (!name) return null
+  const pool = [...(activeColumn()?.items ?? []), ...state.selection]
+  return pool.find((i) => i.name === name) ?? null
+}
+
+/** The paths being dragged, each with a name the transfer can report on. */
+function dragPayload() {
+  if (!dragState) return { paths: [], names: {} }
+  const names = {}
+  for (const item of dragState.items) {
+    if (item.path) names[item.path] = item.name
+  }
+  return { paths: dragState.items.map((i) => i.path).filter(Boolean), names }
+}
+
+/**
+ * Start a drag from a row or an icon cell.
+ *
+ * Dragging an item that is NOT part of the selection drags just that item, the way every
+ * file manager behaves — otherwise picking up one file out of five would move all five.
+ */
+function onDragStart(event) {
+  const node = event.target.closest?.('.row, .icon-cell')
+  if (!node) return
+  const item = itemForNode(node)
+  if (!item?.path) {
+    event.preventDefault()
+    return
+  }
+
+  const items = isSelected(item.name) ? [...state.selection] : [item]
+  dragState = { items, from: activePath() }
+
+  // The payload is set even though we read our own state, because another application may
+  // be the one receiving the drop.
+  try {
+    event.dataTransfer.setData('text/plain', items.map((i) => i.name).join('\n'))
+    event.dataTransfer.effectAllowed = 'copyMove'
+  } catch {
+    // A browser that refuses custom data still drags; the in-app path does not need it.
+  }
+
+  for (const i of items) {
+    const el = document.querySelector(`.row[data-name="${CSS.escape(i.name)}"]`)
+    el?.classList.add('is-dragging')
+  }
+}
+
+function onDragEnd() {
+  dragState = null
+  clearDropTargets()
+  for (const node of document.querySelectorAll('.is-dragging')) node.classList.remove('is-dragging')
+}
+
+/** Allow a drop only where one makes sense, and show where it will land. */
+function onDragOver(event) {
+  const destination = dropDestinationAt(event.target)
+  if (!destination) return
+
+  // An item cannot be dropped into the folder it already lives in, and a folder cannot be
+  // dropped into its own subtree. Refusing the highlight is the honest signal; the drop
+  // itself refuses too, in case the pointer arrives without passing through here.
+  if (dragState && dragState.items.some((i) => i.path === destination.path)) return
+
+  event.preventDefault()
+  event.dataTransfer.dropEffect = event.ctrlKey ? 'copy' : 'move'
+  markDropTarget(destination.node)
+}
+
+/** Handle the drop. */
+async function onDrop(event) {
+  const destination = dropDestinationAt(event.target)
+  clearDropTargets()
+  if (!destination) return
+  event.preventDefault()
+
+  const op = event.ctrlKey ? 'copy' : 'move'
+
+  // A drag that began in this app: we know exactly what is in flight.
+  if (dragState) {
+    const { paths, names } = dragPayload()
+    const items = [...dragState.items]
+    dragState = null
+    for (const node of document.querySelectorAll('.is-dragging')) node.classList.remove('is-dragging')
+    if (paths.length === 0) return
+    await runDrop({ op, paths, names, destination: destination.path, label: labelFor(items, op) })
+    return
+  }
+
+  // A drag that arrived from Explorer or another app: the paths have to be resolved from
+  // the dropped File objects, which only the preload side can do.
+  const files = [...(event.dataTransfer?.files ?? [])]
+  if (files.length === 0) return
+  const paths = []
+  const names = {}
+  for (const file of files) {
+    const p = window.finder.pathForFile ? window.finder.pathForFile(file) : ''
+    if (!p) continue
+    paths.push(p)
+    names[p] = file.name
+  }
+  if (paths.length === 0) return
+  await runDrop({
+    op,
+    paths,
+    names,
+    destination: destination.path,
+    label: `${paths.length} item${paths.length === 1 ? '' : 's'}`
+  })
+}
+
+/** A short description of what is being moved, for the message afterwards. */
+function labelFor(items, op) {
+  const verb = op === 'copy' ? 'Copied' : 'Moved'
+  if (items.length === 1) return `${verb} “${items[0].name}”`
+  return `${verb} ${items.length} items`
+}
+
+/** Run the transfer and report what actually happened. */
+async function runDrop({ op, paths, names, destination, label }) {
+  const result = await window.finder.dropFiles({ op, paths, names, destination })
+  if (result?.noop) {
+    showToast('That item is already in that folder.')
+    return
+  }
+  if (result?.ok) {
+    showToast(`${label}.`)
+  } else if (result?.moved > 0) {
+    // A partial failure is a partial failure, and says which item went wrong.
+    showToast(`${label.split(' ')[0]} ${result.moved} of ${result.total}. ${result.error}`)
+  } else {
+    showToast(result?.error || 'That did not work.')
+  }
+  if (result?.moved > 0) await refreshLive()
+}
+
+// ---------------------------------------------------------------------------
 // Icons
 // ---------------------------------------------------------------------------
 
@@ -429,6 +626,9 @@ function buildRow(item, { showMeta = false } = {}) {
   row.dataset.name = item.name
   row.dataset.dir = item.isDirectory ? '1' : ''
   row.dataset.kind = item.kind || ''
+  // Draggable so a file can be picked up and dropped on a folder. The path is carried on
+  // the item, not looked up later, because dragstart is synchronous and cannot await IPC.
+  row.draggable = true
   row.setAttribute('role', 'option')
   row.setAttribute('aria-selected', 'false')
 
@@ -707,6 +907,7 @@ function renderColumns() {
     const pane = document.createElement('div')
     pane.className = 'column'
     pane.dataset.index = String(index)
+    pane.dataset.path = column.path || ''
 
     const items = presentItems(column.items)
 
@@ -817,6 +1018,7 @@ function renderIcons() {
     cell.dataset.name = item.name
     cell.dataset.dir = item.isDirectory ? '1' : ''
     cell.dataset.kind = item.kind || ''
+    cell.draggable = true
     if (isSelected(item.name)) cell.classList.add('is-selected')
 
     const art = document.createElement('span')
@@ -2986,6 +3188,20 @@ el.content.addEventListener('click', (event) => {
 
   selectInColumn(index, target.dataset.name)
 })
+
+// Drag and drop, delegated the same way the click handlers are. A drag that starts in
+// this app is handled from our own state; a drag that arrives from Explorer is resolved
+// through the preload, which is the only side that can turn a File into a real path.
+el.content.addEventListener('dragstart', onDragStart)
+el.content.addEventListener('dragend', onDragEnd)
+el.content.addEventListener('dragover', onDragOver)
+el.content.addEventListener('drop', onDrop)
+el.sidebar.addEventListener('dragover', onDragOver)
+el.sidebar.addEventListener('drop', onDrop)
+// Dropping on the window itself must not navigate away from the app, which is the
+// browser default for a dropped file.
+window.addEventListener('dragover', (event) => event.preventDefault())
+window.addEventListener('drop', (event) => event.preventDefault())
 
 el.content.addEventListener('dblclick', async (event) => {
   const target = event.target.closest('.row, .icon-cell')

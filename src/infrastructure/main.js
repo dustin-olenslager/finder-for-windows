@@ -17,7 +17,7 @@ const { listDirectory } = require('../application/list-directory')
 const { getSidebar } = require('../application/get-sidebar')
 const { getPreview } = require('../application/get-preview')
 const { performFileOperation } = require('../application/file-operations')
-const { transferFiles } = require('../application/transfer-files')
+const { transferFiles, dropFiles } = require('../application/transfer-files')
 const { createFolderWatcher } = require('./folder-watcher')
 const { createIndexBuilder } = require('../application/build-index')
 const { searchIndex } = require('../application/search-index')
@@ -85,6 +85,7 @@ function createContainer() {
     getPreview: (filePath, name) => getPreview({ fileReader }, filePath, name),
     performFileOperation: (request) => performFileOperation({ fileOperations }, request),
     transfer: (request) => transferFiles({ fileOperations }, request),
+    dropFiles: (request) => dropFiles({ fileOperations }, request),
 
     // ---- search -----------------------------------------------------------
     search: (request) => searchIndex({ store }, request ?? {}),
@@ -191,6 +192,7 @@ app.whenReady().then(() => {
     return { ok: true, watching: (paths || []).length }
   })
   ipcMain.handle('transfer', (_event, request) => container.transfer(request))
+  ipcMain.handle('drop-files', (_event, request) => container.dropFiles(request))
 
   // Search. The scan pushes progress to the window that asked for it, so the UI can
   // show coverage while it runs instead of a spinner with no information in it.

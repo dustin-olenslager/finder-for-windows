@@ -8,7 +8,7 @@
  * Every method here maps to exactly one IPC channel handled in the composition root.
  */
 
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 contextBridge.exposeInMainWorld('finder', {
   /**
@@ -58,6 +58,29 @@ contextBridge.exposeInMainWorld('finder', {
    * renderer has no filesystem access, and a batch needs to report per-item results.
    */
   transfer: (request) => ipcRenderer.invoke('transfer', request),
+
+  /**
+   * Drop a set of paths onto a folder. Separate from `transfer` because a drag carries its
+   * own rule — you cannot drop a folder into itself or into its own subtree — and because
+   * the modifier key decides whether it copies or moves.
+   */
+  dropFiles: (request) => ipcRenderer.invoke('drop-files', request),
+
+  /**
+   * The filesystem path behind a dropped File object.
+   *
+   * The renderer has no filesystem access, so a drop arrives as a File with an opaque
+   * name. `webUtils.getPathForFile` is the supported way to resolve it, and it must be
+   * called on the preload side where the real File object still exists.
+   */
+  pathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file)
+    } catch {
+      return ''
+    }
+  },
+
 
   /**
    * Set the interface scale. Goes through the main process because Chromium's page zoom

@@ -38,6 +38,9 @@ const nodeGlobals = {
 const browserGlobals = {
   window: 'readonly',
   document: 'readonly',
+  // CSS.escape builds the selector that finds a row by name, which a filename with a
+  // quote or a bracket would otherwise break.
+  CSS: 'readonly',
   navigator: 'readonly',
   localStorage: 'readonly',
   requestAnimationFrame: 'readonly',

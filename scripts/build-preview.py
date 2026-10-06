@@ -85,10 +85,13 @@ def sample_tree():
     }
 
 
-def to_items(rows):
+def to_items(rows, parent=""):
     return [
         {
             "name": name,
+            # The real reader joins the absolute path at the source, because dragstart is
+            # synchronous and cannot wait for a round trip. The harness must model that.
+            "path": ((parent.rstrip("\\/") + ("\\" if "\\" in parent else "/") + name) if parent else None),
             "isDirectory": is_dir,
             "size": size,
             "modifiedAt": modified,
@@ -122,6 +125,65 @@ window.finder = {
     if (!items) return { ok: true, path, items: [] };
     return { ok: true, path, items };
   },
+  // Drag and drop, mirroring the real use case's rules closely enough to assert against:
+  // a self-drop is refused, a drop back where it came from is a quiet no-op, and an
+  // occupied name is never overwritten.
+  async dropFiles(request) {
+    const bs = String.fromCharCode(92);
+    const op = request && request.op === 'copy' ? 'copy' : 'move';
+    const dest = String((request && request.destination) || '');
+    let clean = dest;
+    while (clean.endsWith(bs) || clean.endsWith('/')) clean = clean.slice(0, -1);
+    const paths = (request && request.paths) || [];
+    const names = (request && request.names) || {};
+    if (!clean) return { ok: false, op, moved: 0, total: 0, results: [], error: 'That drop had no destination folder.' };
+    if (!paths.length) return { ok: false, op, moved: 0, total: 0, results: [], error: 'That drop had nothing in it.' };
+    const sep = clean.includes(bs) ? bs : '/';
+    const tail = (p) => String(p).split(/[^a-zA-Z0-9._ -]/).filter(Boolean).pop();
+    const parentOf = (p) => {
+      const s = String(p);
+      let end = s.length;
+      while (end > 0 && (s[end - 1] === bs || s[end - 1] === '/')) end -= 1;
+      const cut = s.slice(0, end);
+      const i = Math.max(cut.lastIndexOf(bs), cut.lastIndexOf('/'));
+      return i <= 0 ? cut.slice(0, i + 1) : cut.slice(0, i);
+    };
+    if (op === 'move' && paths.every((p) => parentOf(p).toLowerCase() === clean.toLowerCase())) {
+      return { ok: true, op, moved: 0, total: paths.length, results: [], noop: true };
+    }
+    if (!TREE[clean]) TREE[clean] = [];
+    const results = [];
+    for (const p of paths) {
+      const name = names[p] || tail(p);
+      let base = String(p);
+      while (base.endsWith(bs) || base.endsWith('/')) base = base.slice(0, -1);
+      if (String(clean).toLowerCase().startsWith(base.toLowerCase() + sep)) {
+        return { ok: false, op, moved: 0, total: paths.length, results: [], error: '\u201c' + name + '\u201d cannot be copied into itself.' };
+      }
+      const taken = TREE[clean].some((e) => e.name.toLowerCase() === name.toLowerCase());
+      if (taken) {
+        results.push({ name, ok: false, error: 'There is already an item named \u201c' + name + '\u201d in that folder.' });
+        continue;
+      }
+      const parent = parentOf(p);
+      const source = (TREE[parent] || []).find((e) => e.name === name);
+      const copy = source ? Object.assign({}, source) : { name, isDirectory: false, kind: 'other', size: 0, modified: 0 };
+      copy.path = clean + sep + name;
+      TREE[clean].push(copy);
+      if (op === 'move' && source) TREE[parent] = TREE[parent].filter((e) => e.name !== name);
+      results.push({ name, ok: true });
+    }
+    const done = results.filter((r) => r.ok).length;
+    const failed = results.filter((r) => !r.ok);
+    window.__drops = (window.__drops || []).concat([{ op, dest: clean, names: results.filter((r) => r.ok).map((r) => r.name), done }]);
+    return {
+      ok: failed.length === 0, op, moved: done, total: paths.length, results,
+      error: failed.length === 0 ? undefined : done + ' of ' + paths.length + ' done. ' + failed[0].name + ': ' + failed[0].error
+    };
+  },
+  // A dropped File resolves to a path only on the preload side; the harness gives a File
+  // a plausible path so a simulated drop from Explorer can be tested.
+  pathForFile(file) { return file && file.__path ? file.__path : ''; },
   async getSidebar() { return SIDEBAR; },
   async startFolder() { return 'C:\\\\Users\\\\dustin'; },
   async joinPath(dir, name) {
@@ -224,6 +286,15 @@ window.finder = {
   // WITHOUT navigating away and back — the reported bug.
   __addFile(path, entry) {
     TREE[path] = TREE[path] || [];
+    // Give the entry its absolute path, exactly as the real reader does. Without it the
+    // item cannot be dragged at all, because dragstart is synchronous and has nothing to
+    // carry — that is a fixture gap, not an app behaviour.
+    if (entry && !entry.path) {
+      const bs = String.fromCharCode(92);
+      let base = String(path);
+      while (base.endsWith(bs) || base.endsWith('/')) base = base.slice(0, -1);
+      entry.path = base + (String(path).includes(bs) ? bs : '/') + entry.name;
+    }
     TREE[path].push(entry);
     if (typeof window.__fireFoldersChanged === 'function') window.__fireFoldersChanged();
     return entry;
@@ -313,7 +384,7 @@ def main():
         "stats": {"files": 3, "folders": 2, "contentRead": 2, "elapsedMs": 4200, "finishedAt": 1759700000000},
     }
 
-    tree = {path: to_items(rows) for path, rows in sample_tree().items()}
+    tree = {path: to_items(rows, path) for path, rows in sample_tree().items()}
 
     sidebar = {
         "ok": True,
