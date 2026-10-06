@@ -145,6 +145,44 @@ window.finder = {
     return { ok: true, mode: 'system', kind: 'other', extension: '', note: 'No preview for this file type.' };
   },
   async fileOperation() { return { ok: true }; },
+  // Mirrors the real transfer use case closely enough to be worth asserting against:
+  // it MOVES or COPIES entries in the fixture tree, so a test can prove the item really
+  // arrived rather than trusting a toast. It refuses an occupied destination, the same
+  // rule the real use case enforces.
+  async transfer(request) {
+    const op = request && request.op === 'move' ? 'move' : 'copy';
+    const items = (request && request.items) || [];
+    const dest = String((request && request.destination) || '').replace(/[\\\\/]+$/, '');
+    if (!dest) return { ok: false, error: 'A destination folder is required.' };
+    if (!items.length) return { ok: false, error: 'Nothing to transfer.' };
+    if (!TREE[dest]) TREE[dest] = [];
+    const results = [];
+    for (const item of items) {
+      const taken = TREE[dest].some((e) => e.name.toLowerCase() === String(item.name).toLowerCase());
+      if (taken) {
+        results.push({ name: item.name, ok: false, error: 'There is already an item named \u201c' + item.name + '\u201d in that folder.' });
+        continue;
+      }
+      const from = String(item.path || '').replace(/[\\\\/]+$/, '');
+      const parent = from.slice(0, Math.max(from.lastIndexOf('\\\\'), from.lastIndexOf('/')));
+      const source = (TREE[parent] || []).find((e) => e.name === item.name);
+      const copy = source ? Object.assign({}, source) : { name: item.name, isDirectory: false, kind: 'other', size: 0, modified: 0 };
+      TREE[dest].push(copy);
+      if (op === 'move' && source) TREE[parent] = TREE[parent].filter((e) => e.name !== item.name);
+      results.push({ name: item.name, ok: true });
+    }
+    const done = results.filter((r) => r.ok).length;
+    const failed = results.filter((r) => !r.ok);
+    window.__transfers = (window.__transfers || []).concat([{ op, dest, items: items.map((i) => i.name), done }]);
+    return {
+      ok: failed.length === 0,
+      op,
+      moved: done,
+      total: results.length,
+      results,
+      error: failed.length ? done + ' of ' + results.length + ' done. ' + failed[0].name + ': ' + failed[0].error : undefined,
+    };
+  },
   // The real app copies through Electron's clipboard module. The harness records what
   // was copied so a test can assert the VALUE, not just that a toast appeared.
   async copyText(text) {
@@ -175,9 +213,30 @@ window.finder = {
   async buildIndex() { return { ok: true }; },
   async cancelIndex() { return { ok: true }; },
   onIndexProgress() { return () => {}; },
-  async listTags() { return {}; },
-  async tagItem() { return { ok: true }; },
-  async untagItem() { return { ok: true }; },
+  // Records which folders the renderer asked to watch, so a test can prove the app
+  // watches exactly what is on screen — and can fire a change on demand.
+  async watchFolders(paths) {
+    window.__watched = Array.isArray(paths) ? paths.slice() : [];
+    return { ok: true, watching: window.__watched.length };
+  },
+  onFoldersChanged(callback) {
+    window.__fireFoldersChanged = callback;
+    return () => { window.__fireFoldersChanged = null; };
+  },
+  // A tag store that actually holds tags, so the UI can be exercised: an empty store
+  // would make every tag check pass vacuously.
+  async listTags() { return window.__tags || {}; },
+  async tagItem(record, tagName) {
+    window.__tags = window.__tags || {};
+    window.__tags[tagName] = window.__tags[tagName] || [];
+    if (!window.__tags[tagName].includes(record.path)) window.__tags[tagName].push(record.path);
+    return { ok: true };
+  },
+  async untagItem(record, tagName) {
+    window.__tags = window.__tags || {};
+    window.__tags[tagName] = (window.__tags[tagName] || []).filter((p) => p !== record.path);
+    return { ok: true };
+  },
   async search(request) {
     const q = (request && request.text ? request.text : '').toLowerCase().trim();
     if (!q) return { ok: true, results: [], total: 0, scanned: 0 };

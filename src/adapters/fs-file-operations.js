@@ -36,6 +36,18 @@ function createFsFileOperations({ trash }) {
       await trash(target)
     },
 
+    /**
+     * Copy a file OR a whole folder tree.
+     *
+     * `fs.cp` with `recursive` is the only supported route: it handles both cases and
+     * follows the platform's own rules for links and permissions. `force: false` keeps
+     * the never-clobber promise made by the use case — the destination check happens
+     * there, and this refuses rather than silently replacing.
+     */
+    async copy(from, to) {
+      await fs.cp(from, to, { recursive: true, errorOnExist: true, force: false })
+    },
+
     async exists(target) {
       try {
         await fs.stat(target)

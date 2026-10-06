@@ -17,7 +17,7 @@
  */
 
 const { validateName } = require('../domain/file-name')
-const { normalizePath, parentOf, joinPath } = require('../domain/paths')
+const { normalizePath, parentOf, joinPath, isRecyclable } = require('../domain/paths')
 
 /**
  * @param {{ fileOperations: { mkdir: Function, rename: Function, trash: Function, exists: Function } }} deps
@@ -91,6 +91,16 @@ async function trash(fileOperations, request) {
   // the OS returns for it is unhelpful.
   if (parentOf(target) === null) {
     return { ok: false, error: 'A drive cannot be moved to the Recycle Bin.' }
+  }
+
+  // A UNC path cannot go to the Recycle Bin, and Electron does not fail on one — it
+  // deletes the file permanently and reports success. Refusing is the only safe answer:
+  // an honest refusal beats a message that promises a Recycle Bin and destroys the file.
+  if (!isRecyclable(target)) {
+    return {
+      ok: false,
+      error: 'A file on a network location cannot go to the Recycle Bin. Nothing was deleted.'
+    }
   }
 
   await fileOperations.trash(target)

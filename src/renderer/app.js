@@ -41,6 +41,7 @@ const el = {
   patternInput: document.getElementById('patternInput'),
   patternClear: document.getElementById('patternClear'),
   filterClear: document.getElementById('filterClear'),
+  pasteHint: document.getElementById('pasteHint'),
   searchClear: document.getElementById('searchClear'),
   scope: document.getElementById('scope'),
   scopeWrap: document.getElementById('scopeWrap'),
@@ -75,7 +76,15 @@ const state = {
   kindFilter: new Set(),
   // A name pattern, for the shot-naming case: "V003" or "_VO" narrows a version folder.
   pattern: '',
-  selected: null, // { name, isDirectory, kind, path }
+  selected: null, // { name, isDirectory, kind, path } — the LEAD item
+  // Every selected item. `selected` is always one of these (or null); this is what
+  // batch operations act on.
+  selection: [],
+  anchorName: null, // where Shift+click extends a range from
+  activeTag: null, // the tag whose files are being shown, if any
+  tags: {}, // every tag and its files
+  // The in-app file clipboard: { op: 'copy'|'move', items: [{name, path}] }.
+  clipboard: null,
   activeSidebar: null,
   // ON by default. A preview nobody can find is not a feature: the first version only
   // opened it on a shortcut, so the owner saw no previews at all.
@@ -351,6 +360,8 @@ function render() {
   renderSortLabel()
   renderFilterLabel()
   renderPatternBar()
+  renderClipboardState()
+  syncWatchers()
 }
 
 function renderNavButtons() {
@@ -571,6 +582,8 @@ async function runSearch() {
     state.searchResults = []
     state.searchTotal = 0
     state.selected = null
+  state.selection = []
+  state.anchorName = null
     render()
     return
   }
@@ -605,6 +618,8 @@ function exitSearch() {
   state.searchResults = []
   state.searchTotal = 0
   state.selected = null
+  state.selection = []
+  state.anchorName = null
   render()
 }
 
@@ -703,7 +718,7 @@ function renderColumns() {
     } else {
       for (const item of items) {
         const row = buildRow(item)
-        if (column.selectedName === item.name) {
+        if (isSelected(item.name)) {
           row.classList.add('is-selected')
           row.setAttribute('aria-selected', 'true')
         }
@@ -768,7 +783,7 @@ function renderList() {
 
   for (const item of items) {
     const row = buildRow(item, { showMeta: true })
-    if (column.selectedName === item.name) {
+    if (isSelected(item.name)) {
       row.classList.add('is-selected')
       row.setAttribute('aria-selected', 'true')
     }
@@ -802,7 +817,7 @@ function renderIcons() {
     cell.dataset.name = item.name
     cell.dataset.dir = item.isDirectory ? '1' : ''
     cell.dataset.kind = item.kind || ''
-    if (column.selectedName === item.name) cell.classList.add('is-selected')
+    if (isSelected(item.name)) cell.classList.add('is-selected')
 
     const art = document.createElement('span')
     art.className = 'icon-art' + (item.kind === 'image' ? ' is-picture' : '')
@@ -1214,6 +1229,133 @@ async function renderSidebar() {
 
     el.sidebar.append(list)
   }
+
+  renderTagSection()
+}
+
+/**
+ * The Tags section of the sidebar.
+ *
+ * Tags have existed in the app since the tag store was built, but with no way to see or
+ * apply one they were invisible — built and unreachable. This is the surface.
+ *
+ * The section is HONEST about scope: these tags live in this app and nowhere else, so
+ * the heading says so rather than letting a user tag a file and expect Windows to show
+ * it. A tag with no files is not listed; an empty section says how to make one.
+ */
+async function renderTagSection() {
+  let byTag = {}
+  try {
+    byTag = (await window.finder.listTags()) || {}
+  } catch {
+    byTag = {}
+  }
+  state.tags = byTag
+
+  const names = Object.keys(byTag).filter((n) => (byTag[n] || []).length > 0)
+
+  const heading = document.createElement('h2')
+  heading.className = 'sidebar-heading'
+  heading.textContent = 'Tags'
+  el.sidebar.append(heading)
+
+  const note = document.createElement('p')
+  note.className = 'sidebar-note'
+  note.textContent = 'Kept by this app only'
+  note.title = 'These tags live inside Finder for Windows. Windows itself will not show them.'
+  el.sidebar.append(note)
+
+  const list = document.createElement('ul')
+  list.className = 'sidebar-list'
+
+  if (names.length === 0) {
+    const empty = document.createElement('li')
+    empty.className = 'sidebar-empty'
+    // Say how to make one, so the empty state is a next step rather than a dead end.
+    empty.textContent = 'Right-click a file to add one.'
+    list.append(empty)
+  }
+
+  for (const name of names) {
+    const li = document.createElement('li')
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'sidebar-item tag-item'
+    button.dataset.tag = name
+    if (state.activeTag === name) button.classList.add('is-active')
+
+    const dot = document.createElement('span')
+    dot.className = `tag-dot tag-${TAG_COLORS[name] || 'gray'}`
+
+    const label = document.createElement('span')
+    label.className = 'sidebar-label'
+    label.textContent = name
+
+    const count = document.createElement('span')
+    count.className = 'tag-count'
+    count.textContent = String(byTag[name].length)
+
+    button.append(dot, label, count)
+    button.addEventListener('click', () => showTag(name))
+    li.append(button)
+    list.append(li)
+  }
+
+  el.sidebar.append(list)
+}
+
+/** A stable color per tag name, so the same tag looks the same everywhere. */
+const TAG_COLORS = {
+  Red: 'red', Orange: 'orange', Yellow: 'yellow', Green: 'green',
+  Blue: 'blue', Purple: 'purple', Gray: 'gray'
+}
+
+/**
+ * Show the files carrying a tag.
+ *
+ * Implemented as a search rather than a second view, so there is ONE list-rendering path
+ * in the app and the tag view cannot drift from the folder view.
+ */
+async function showTag(name) {
+  const turningOff = state.activeTag === name
+  state.activeTag = turningOff ? null : name
+
+  if (turningOff) {
+    exitSearch()
+    renderSidebar()
+    return
+  }
+
+  const paths = new Set(state.tags?.[name] || [])
+  // The results must be real items, not bare paths: the list renders name, kind and
+  // size, and a row missing those is a row the user cannot act on.
+  const items = []
+  for (const path of paths) {
+    const item = await describePath(path)
+    if (item) items.push(item)
+  }
+
+  state.searchText = `tag:${name}`
+  state.searchResults = items
+  state.searchTotal = items.length
+  state.searchError = null
+  state.searchBusy = false
+  render()
+  renderSidebar()
+}
+
+/** Read the facts about one path, so a result row has a name, a kind and a size. */
+async function describePath(path) {
+  try {
+    const parent = await window.finder.parentPath(path)
+    const name = path.split(/[\\/]/).pop()
+    if (!parent) return null
+    const listing = await window.finder.listDirectory(parent)
+    const item = (listing.items || []).find((i) => i.name === name)
+    return item ? { ...item, path } : null
+  } catch {
+    return null
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1258,6 +1400,8 @@ async function openFolder(path) {
   state.activeSidebar = path
   state.columns = [await readColumn(path)]
   state.selected = null
+  state.selection = []
+  state.anchorName = null
   state.filter = ''
   el.search.value = ''
   render()
@@ -1273,6 +1417,8 @@ async function descend(index, item) {
   state.columns[index].selectedName = item.name
   state.columns.push(await readColumn(childPath))
   state.selected = { ...item, path: childPath }
+  state.selection = [state.selected]
+  state.anchorName = item.name
   render()
   showColumnError(activeColumn())
 }
@@ -1291,6 +1437,8 @@ async function selectInColumn(index, name) {
   column.selectedName = name
   const path = await window.finder.joinPath(column.path, name)
   state.selected = { ...item, path }
+  state.selection = [state.selected]
+  state.anchorName = item.name
 
   if (item.isDirectory) {
     state.columns = state.columns.slice(0, index + 1)
@@ -1309,6 +1457,109 @@ function showColumnError(column) {
     banner.textContent = column.error
     el.content.prepend(banner)
   }
+}
+
+/**
+ * Selecting items, including more than one.
+ *
+ * `state.selected` remains the LEAD item — the one the preview and status bar describe —
+ * and `state.selection` holds every selected item. Keeping the lead separate means the
+ * hundred places that read `state.selected` keep working, and a multi-selection still has
+ * a definite answer to "which file are you showing me".
+ *
+ * The anchor is what Shift+click extends from, so a range is a range and not a guess.
+ */
+function selectedItems() {
+  return state.selection
+}
+
+function selectionNames() {
+  return new Set(state.selection.map((i) => i.name))
+}
+
+/** Is this item part of the current selection? */
+function isSelected(name) {
+  return state.selection.some((i) => i.name === name)
+}
+
+/** The active column's items in DISPLAY order — the order a range is taken in. */
+function orderedItems() {
+  const column = activeColumn()
+  return column ? presentItems(column.items) : []
+}
+
+/**
+ * Apply a click to the selection.
+ *
+ * - plain click: select just this item, and make it the anchor
+ * - Ctrl+click: add or remove this item, leaving the rest alone
+ * - Shift+click: select everything from the anchor to here, in display order
+ */
+function applySelection(name, { shift = false, ctrl = false } = {}) {
+  const items = orderedItems()
+  const item = items.find((i) => i.name === name)
+  if (!item) return
+
+  if (shift && state.anchorName) {
+    const from = items.findIndex((i) => i.name === state.anchorName)
+    const to = items.findIndex((i) => i.name === name)
+    if (from !== -1 && to !== -1) {
+      const [lo, hi] = from <= to ? [from, to] : [to, from]
+      const range = items.slice(lo, hi + 1)
+      // Shift replaces the selection with the range; Ctrl+Shift would add to it, but a
+      // replace is what a file manager does and what people expect.
+      state.selection = ctrl ? dedupe([...state.selection, ...range]) : range
+      state.selected = { ...item }
+      return
+    }
+  }
+
+  if (ctrl) {
+    const already = isSelected(name)
+    state.selection = already
+      ? state.selection.filter((i) => i.name !== name)
+      : dedupe([...state.selection, item])
+    // Removing the lead item must move the lead somewhere definite.
+    if (already && state.selected?.name === name) {
+      state.selected = state.selection.length ? state.selection[state.selection.length - 1] : null
+    } else if (!already) {
+      state.selected = { ...item }
+    }
+    state.anchorName = name
+    return
+  }
+
+  state.selection = [item]
+  state.selected = { ...item }
+  state.anchorName = name
+}
+
+/** Selection entries are unique by name; two clicks must not double-count. */
+function dedupe(items) {
+  const seen = new Set()
+  return items.filter((i) => (seen.has(i.name) ? false : seen.add(i.name)))
+}
+
+/**
+ * Shift+Arrow: grow or shrink the selection by one row.
+ *
+ * The anchor stays put and the LEAD moves, which is how a range feels: you hold the
+ * anchor with one hand and move the other end.
+ */
+function extendSelection(delta) {
+  const items = orderedItems()
+  if (items.length === 0) return
+  const lead = items.findIndex((i) => i.name === state.selected?.name)
+  if (lead === -1) return
+  const target = Math.min(items.length - 1, Math.max(0, lead + delta))
+  if (target === lead) return
+
+  const anchor = state.anchorName ?? items[lead].name
+  const from = items.findIndex((i) => i.name === anchor)
+  const [lo, hi] = from <= target ? [from, target] : [target, from]
+  state.selection = items.slice(lo, hi + 1)
+  state.selected = { ...items[target] }
+  render()
 }
 
 /** Move the selection by one row, within the column the selection lives in. */
@@ -1484,18 +1735,45 @@ async function renameSelected() {
   await runNameOperation({ op: 'rename', path, name }, { title: 'Rename', confirmLabel: 'Rename' })
 }
 
+/**
+ * Move everything selected to the Recycle Bin.
+ *
+ * A batch must be all-or-nothing in its REPORTING: if three of five fail, saying
+ * "5 moved" is a lie. Each result is counted, and a partial failure names how many
+ * actually went.
+ */
 async function trashSelected() {
-  const item = state.selected
-  if (!item) return
-  const path = item.path || (await window.finder.joinPath(activePath(), item.name))
-  const result = await window.finder.fileOperation({ op: 'trash', path })
-  if (!result.ok) {
-    showToast(result.error)
+  const items = selectedItems()
+  if (items.length === 0) return
+
+  let moved = 0
+  const failures = []
+  for (const item of items) {
+    const path = item.path || (await window.finder.joinPath(activePath(), item.name))
+    const result = await window.finder.fileOperation({ op: 'trash', path })
+    if (result.ok) moved += 1
+    else failures.push(`${item.name}: ${result.error}`)
+  }
+
+  state.selected = null
+  state.selection = []
+  state.anchorName = null
+  await refreshAfterMutation()
+
+  if (failures.length === 0) {
+    showToast(
+      moved === 1
+        ? `“${items[0].name}” moved to the Recycle Bin.`
+        : `${moved} items moved to the Recycle Bin.`
+    )
     return
   }
-  state.selected = null
-  await refreshAfterMutation()
-  showToast(`“${item.name}” moved to the Recycle Bin.`)
+  // Say exactly what happened rather than rounding to a success.
+  showToast(
+    moved === 0
+      ? `Nothing was moved. ${failures[0]}`
+      : `${moved} moved, ${failures.length} could not be: ${failures[0]}`
+  )
 }
 
 /** Re-read the columns in place, keeping the user where they were. */
@@ -1512,8 +1790,44 @@ async function refreshAfterMutation() {
   state.columns = fresh
   const stillThere = fresh.some((c) => c.items.some((i) => i.name === state.selected?.name))
   if (!stillThere) state.selected = null
+  state.selection = []
+  state.anchorName = null
   render()
   showColumnError(activeColumn())
+}
+
+/**
+ * Re-list the folders on screen, keeping the selection.
+ *
+ * Distinct from refreshAfterMutation, which drops the selection because the operation
+ * just invalidated it. Here the user did nothing: another program created a file, and
+ * losing the selection because someone else saved a document would be maddening.
+ */
+async function refreshLive() {
+  const paths = state.columns.map((c) => c.path)
+  const selectedNames = state.columns.map((c) => c.selectedName)
+  const keepLead = state.selected?.name ?? null
+  const keepSelection = selectionNames()
+
+  const fresh = []
+  for (let index = 0; index < paths.length; index += 1) {
+    fresh.push(await readColumn(paths[index], { selectedName: selectedNames[index] }))
+  }
+  state.columns = fresh
+
+  // Re-apply the selection to the NEW items, so a row keeps its identity by name.
+  const lead = fresh.flatMap((c) => c.items).find((i) => i.name === keepLead)
+  state.selected = lead ? { ...lead } : null
+  state.selection = fresh.flatMap((c) => c.items).filter((i) => keepSelection.has(i.name))
+  if (!lead) state.anchorName = null
+  render()
+}
+
+/** Start watching the folders on screen, so a change on disk shows up on its own. */
+function syncWatchers() {
+  if (typeof window.finder.watchFolders !== 'function') return
+  const paths = state.columns.map((c) => c.path).filter(Boolean)
+  window.finder.watchFolders(paths).catch(() => {})
 }
 
 function showToast(message) {
@@ -1596,6 +1910,12 @@ const MENUS = {
     label: 'File',
     items: [
       { label: 'New Folder', accel: 'Ctrl+Shift+N', run: createFolder },
+      { separator: true },
+      { label: 'Copy', accel: 'Ctrl+C', run: copySelection },
+      { label: 'Cut', accel: 'Ctrl+X', run: cutSelection },
+      { label: 'Paste', accel: 'Ctrl+V', disabled: true, note: 'Copy or cut something first', run: () => pasteInto() },
+      { label: 'Select All', accel: 'Ctrl+A', run: selectAll },
+      { separator: true },
       { label: 'Rename…', accel: 'F2', run: renameSelected },
       { label: 'Move to Recycle Bin', accel: 'Delete', run: trashSelected },
       { separator: true },
@@ -1850,6 +2170,13 @@ function contextItemsFor(kind) {
       { label: 'Quick Look', accel: 'Space', run: openQuickLook },
       { label: 'Show Preview', accel: 'Ctrl+I', run: () => setPreviewOpen(!state.previewOpen) },
       { separator: true },
+      // The batch verbs name how many items they will act on, so a right-click on a
+      // 5-item selection cannot be mistaken for acting on one file.
+      { label: 'Tags…', run: () => openTagMenu() },
+      { separator: true },
+      { label: selectionCountLabel('Copy'), accel: 'Ctrl+C', run: copySelection },
+      { label: selectionCountLabel('Cut'), accel: 'Ctrl+X', run: cutSelection },
+      { separator: true },
       { label: 'Copy Path', accel: 'Ctrl+Shift+C', run: copySelectedPath },
       { label: 'Copy Name', run: copySelectedName },
       { separator: true },
@@ -1864,7 +2191,16 @@ function contextItemsFor(kind) {
   return [
     { label: 'New Folder', accel: 'Ctrl+Shift+N', run: createFolder },
     { separator: true },
-    { label: 'Paste', accel: 'Ctrl+V', disabled: true, note: 'Coming soon' },
+    {
+      label: clipboardHasItems()
+        ? `Paste ${state.clipboard.items.length} ${state.clipboard.op === 'move' ? 'cut' : 'copied'} item${state.clipboard.items.length === 1 ? '' : 's'}`
+        : 'Paste',
+      accel: 'Ctrl+V',
+      // Disabled with a reason beats a menu entry that silently does nothing.
+      disabled: !clipboardHasItems(),
+      note: 'Copy or cut something first',
+      run: () => pasteInto()
+    },
     { separator: true },
     { label: 'View as Columns', accel: 'Ctrl+1', run: () => setView('column') },
     { label: 'View as List', accel: 'Ctrl+2', run: () => setView('list') },
@@ -2007,6 +2343,42 @@ async function stepMedia(delta, { scope = 'folder' } = {}) {
   return { ok: true, name: next.name }
 }
 
+/**
+ * Step through the folder while Quick Look is open.
+ *
+ * Quick Look walks EVERY file, not only media: it is a look at the folder, and skipping
+ * the text files between two images would make the arrows feel broken. (Stepping the
+ * preview pane is the media-only gesture; this is the browsing one.)
+ *
+ * The overlay is refilled after moving, which is the part that was missing — moving the
+ * selection without re-rendering left the overlay showing the previous file.
+ */
+async function stepQuickLook(delta) {
+  const column = activeColumn()
+  if (!column) return { ok: false, error: 'No folder is open.' }
+
+  const pool = presentItems(column.items).filter((item) => !item.isDirectory)
+  if (pool.length === 0) {
+    showToast('No files to step through here.')
+    return { ok: false, error: 'nothing to step through' }
+  }
+
+  const current = state.selected
+  const index = current ? pool.findIndex((item) => item.name === current.name) : -1
+  const target = index === -1 ? (delta > 0 ? 0 : pool.length - 1) : index + delta
+
+  if (target < 0 || target >= pool.length) {
+    showToast(delta > 0 ? 'That is the last file here.' : 'That is the first file here.')
+    return { ok: false, error: 'at the end' }
+  }
+
+  const pane = column.path === activePath() ? state.columns.length - 1 : state.columns.indexOf(column)
+  await selectInColumn(pane === -1 ? state.columns.length - 1 : pane, pool[target].name)
+  // Re-open onto the new selection: this is what makes the arrow do something visible.
+  await openQuickLook()
+  return { ok: true, name: pool[target].name }
+}
+
 /** Walk to the neighbouring folder that has a previewable asset in the given direction. */
 async function stepAcrossFolders(delta) {
   const column = activeColumn()
@@ -2081,6 +2453,195 @@ function stepPrev() {
 
 function stepNext() {
   return stepMedia(1)
+}
+
+/**
+ * The tag picker for the current selection.
+ *
+ * A submenu of the seven colors rather than a text field: tags here are a fixed palette
+ * (the same seven Finder uses), so offering the set is faster than typing and makes two
+ * tags that mean the same thing impossible to create by spelling them differently.
+ *
+ * A tag the selection already carries is ticked, and clicking it removes it — one
+ * control for both directions, which is how a toggle should behave.
+ */
+async function openTagMenu() {
+  const items = selectedItems()
+  if (items.length === 0) {
+    showToast('Select something to tag first.')
+    return
+  }
+
+  let current = new Set()
+  try {
+    const held = await window.finder.listTags()
+    for (const item of items) {
+      for (const [tag, paths] of Object.entries(held || {})) {
+        if ((paths || []).includes(item.path)) current.add(tag)
+      }
+    }
+  } catch {
+    current = new Set()
+  }
+
+  const entries = Object.keys(TAG_COLORS).map((name) => ({
+    label: current.has(name) ? `${name} ✓` : name,
+    run: () => toggleTag(name, current.has(name))
+  }))
+
+  // Anchored to the row being tagged, so the picker appears where the user is looking.
+  const anchor = document.querySelector('.row.is-selected') || el.content
+  openMenuAt(anchor, entries)
+}
+
+/** Add or remove one tag on every selected item. */
+async function toggleTag(name, removing) {
+  const items = selectedItems()
+  let changed = 0
+  for (const item of items) {
+    // The tag store keys on path + size + modified, so a stale signature cannot apply
+    // one file's tags to a different file that later took its name.
+    const record = {
+      path: item.path || (await window.finder.joinPath(activePath(), item.name)),
+      size: item.size ?? null,
+      modifiedAt: item.modified ?? null
+    }
+    try {
+      const result = removing
+        ? await window.finder.untagItem(record, name)
+        : await window.finder.tagItem(record, name)
+      if (result?.ok !== false) changed += 1
+    } catch {
+      // A tag that fails to write must not abort the rest of the batch.
+    }
+  }
+  await renderTagSection()
+  renderSidebar()
+  render()
+  showToast(
+    removing
+      ? `Removed “${name}” from ${changed} item${changed === 1 ? '' : 's'}.`
+      : `Tagged ${changed} item${changed === 1 ? '' : 's'} “${name}”.`
+  )
+}
+
+/** "Copy" or "Copy 5 Items" — a batch verb should say how much it will act on. */
+function selectionCountLabel(verb) {
+  const n = state.selection.length
+  return n > 1 ? `${verb} ${n} Items` : verb
+}
+
+/** Select every item in the folder being viewed. */
+function selectAll() {
+  state.selection = orderedItems().slice()
+  state.selected = state.selection[0] ? { ...state.selection[0] } : null
+  state.anchorName = state.selection[0]?.name ?? null
+  render()
+}
+
+// ---------------------------------------------------------------------------
+// Copy, cut and paste
+// ---------------------------------------------------------------------------
+
+/**
+ * The file clipboard.
+ *
+ * Deliberately NOT the system clipboard: Windows' own file clipboard needs CF_HDROP,
+ * which Electron cannot write before v44. Holding the selection in the app means
+ * copy/paste works fully WITHIN the app now, and the system clipboard stays untouched
+ * rather than being left in a half-written state another program would misread.
+ */
+function clipboardHasItems() {
+  return Boolean(state.clipboard && state.clipboard.items.length > 0)
+}
+
+/** Copy the selection. Marks it so the rows can show they are queued. */
+function copySelection() {
+  const items = selectedItems()
+  if (items.length === 0) {
+    showToast('Select something to copy first.')
+    return { ok: false }
+  }
+  state.clipboard = { op: 'copy', items: items.map((i) => ({ name: i.name, path: i.path })) }
+  renderClipboardState()
+  showToast(items.length === 1 ? `“${items[0].name}” copied.` : `${items.length} items copied.`)
+  return { ok: true }
+}
+
+/** Cut the selection: pasting will move rather than copy. */
+function cutSelection() {
+  const items = selectedItems()
+  if (items.length === 0) {
+    showToast('Select something to cut first.')
+    return { ok: false }
+  }
+  state.clipboard = { op: 'move', items: items.map((i) => ({ name: i.name, path: i.path })) }
+  renderClipboardState()
+  showToast(items.length === 1 ? `“${items[0].name}” cut.` : `${items.length} items cut.`)
+  return { ok: true }
+}
+
+/**
+ * Paste into the folder being viewed.
+ *
+ * The destination is the OPEN FOLDER, not the selection's folder: "copy these, go there,
+ * paste" is the whole gesture, and pasting into the folder you are looking at is what
+ * every file manager does.
+ */
+async function pasteInto(destination = activePath()) {
+  if (!clipboardHasItems()) {
+    showToast('Nothing has been copied yet.')
+    return { ok: false }
+  }
+  if (!destination) {
+    showToast('Open a folder to paste into.')
+    return { ok: false }
+  }
+
+  const { op, items } = state.clipboard
+  const result = await window.finder.transfer({ op, items, destination })
+
+  if (!result.ok) {
+    // A partial failure says exactly how far it got; a total failure says why.
+    showToast(result.error || 'That did not work.')
+    await refreshAfterMutation()
+    return result
+  }
+
+  // A move consumes the clipboard — the items are no longer where they were, so
+  // pasting them again would fail confusingly.
+  if (op === 'move') {
+    state.clipboard = null
+    renderClipboardState()
+  }
+  await refreshAfterMutation()
+  showToast(
+    result.moved === 1
+      ? `${op === 'move' ? 'Moved' : 'Copied'} 1 item.`
+      : `${op === 'move' ? 'Moved' : 'Copied'} ${result.moved} items.`
+  )
+  return result
+}
+
+/**
+ * Show which rows are on the clipboard.
+ *
+ * A cut that looks identical to a copy is how people lose track of what is about to
+ * happen to their files, so the state is visible on the rows themselves.
+ */
+function renderClipboardState() {
+  const names = new Set((state.clipboard?.items || []).map((i) => i.name))
+  for (const row of document.querySelectorAll('.row, .icon-cell')) {
+    const onClipboard = names.has(row.dataset.name)
+    row.classList.toggle('is-clipped', onClipboard)
+    row.classList.toggle('is-cut', onClipboard && state.clipboard?.op === 'move')
+  }
+  if (el.pasteHint) {
+    el.pasteHint.hidden = !clipboardHasItems()
+    if (clipboardHasItems()) {
+      el.pasteHint.textContent = `${state.clipboard.items.length} ${state.clipboard.op === 'move' ? 'cut' : 'copied'} — Ctrl+V to paste here`
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2404,6 +2965,16 @@ el.content.addEventListener('click', (event) => {
 
   const pane = target.closest('.column')
   const index = pane ? Number(pane.dataset.index) : state.columns.length - 1
+
+  // Ctrl and Shift change what the click MEANS. The lead item still descends into a
+  // folder on a plain click, but a modified click is building a selection and must not
+  // navigate away from the list being selected.
+  if (event.ctrlKey || event.metaKey || event.shiftKey) {
+    applySelection(target.dataset.name, { shift: event.shiftKey, ctrl: event.ctrlKey || event.metaKey })
+    render()
+    return
+  }
+
   selectInColumn(index, target.dataset.name)
 })
 
@@ -2499,6 +3070,12 @@ window.finder?.onIndexProgress?.((progress) => {
   renderIndexBar()
 })
 
+// A folder on screen changed on disk. Re-list quietly: the user did nothing, so this
+// must not steal focus, move the selection, or announce itself.
+window.finder?.onFoldersChanged?.(() => {
+  refreshLive().catch(() => {})
+})
+
 el.search.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') clearSearch()
 })
@@ -2565,10 +3142,10 @@ document.addEventListener('keydown', async (event) => {
       // Stepping while Quick Look is open keeps it open — that is the whole point of a
       // full-screen look at a folder of takes.
       event.preventDefault()
-      await stepMedia(1)
+      await stepQuickLook(1)
     } else if (event.key === 'ArrowLeft') {
       event.preventDefault()
-      await stepMedia(-1)
+      await stepQuickLook(-1)
     }
     return
   }
@@ -2589,6 +3166,12 @@ document.addEventListener('keydown', async (event) => {
   } else if (event.key === 'ArrowUp' && event.altKey) {
     event.preventDefault()
     goUp()
+  } else if (event.key === 'ArrowDown' && event.shiftKey) {
+    event.preventDefault()
+    extendSelection(1)
+  } else if (event.key === 'ArrowUp' && event.shiftKey) {
+    event.preventDefault()
+    extendSelection(-1)
   } else if (event.key === 'ArrowDown') {
     event.preventDefault()
     moveSelection(1)
@@ -2635,10 +3218,28 @@ document.addEventListener('keydown', async (event) => {
     event.preventDefault()
     zoomReset()
   } else if (modifier && event.shiftKey && event.key.toLowerCase() === 'c') {
-    // Ctrl+Shift+C is the Windows convention for "copy the path" (Ctrl+C is reserved
-    // for copying the file itself, which is coming with multi-select).
+    // Ctrl+Shift+C is the Windows convention for "copy the path"; plain Ctrl+C copies
+    // the FILES. Both exist because they answer different questions.
     event.preventDefault()
     copySelectedPath()
+  } else if (modifier && !event.shiftKey && event.key.toLowerCase() === 'c') {
+    event.preventDefault()
+    copySelection()
+  } else if (modifier && !event.shiftKey && event.key.toLowerCase() === 'x') {
+    event.preventDefault()
+    cutSelection()
+  } else if (modifier && !event.shiftKey && event.key.toLowerCase() === 'v') {
+    event.preventDefault()
+    await pasteInto()
+  } else if (modifier && !event.shiftKey && event.key.toLowerCase() === 'a') {
+    // Select every item in the folder being viewed.
+    event.preventDefault()
+    selectAll()
+  } else if (event.key === 'F5') {
+    // Refresh by hand, for the cases a watcher cannot cover: a network share, a folder
+    // that could not be watched, or just wanting to be sure.
+    event.preventDefault()
+    await refreshLive()
   } else if (modifier && event.key === 'f') {
     event.preventDefault()
     el.search.focus()

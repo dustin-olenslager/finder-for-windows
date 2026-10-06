@@ -124,4 +124,23 @@ function segments(value) {
   return ['/'].concat(parts)
 }
 
-module.exports = { normalizePath, parentOf, joinPath, isRoot, segments, isDriveBare }
+/**
+ * Can this path go to the Windows Recycle Bin?
+ *
+ * A UNC path (\\server\share\...) cannot. `shell.trashItem` does not fail on one — it
+ * DELETES THE FILE PERMANENTLY and reports success. A file manager that says "moved to
+ * the Recycle Bin" and then destroys the file irrecoverably is worse than one that
+ * refuses, so the app refuses and says why.
+ *
+ * The same applies to a mapped or substituted drive, but those cannot be told apart from
+ * a real drive by their path alone, so they are not guessed at here.
+ */
+function isRecyclable(target) {
+  const normalized = normalizePath(target)
+  if (!normalized) return false
+  // A UNC path starts with two separators. A drive root (C:\) is caught separately by
+  // the caller, because the Recycle Bin cannot hold one.
+  return !/^[\\/]{2}/.test(normalized)
+}
+
+module.exports = { normalizePath, parentOf, joinPath, isRoot, segments, isDriveBare, isRecyclable }

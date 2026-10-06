@@ -183,6 +183,22 @@ last among the features because the index is the largest component and it is the
 
 ## Build notes
 
+> **Build note:** 2026-10-06 — **The batch gestures, and the two rules that protect files.**
+> Multi-select (Ctrl+click, Shift+click, Ctrl+A), copy/cut/paste between folders, live folder
+> refresh, the tags UI and Quick Look stepping all landed together. Two decisions are worth
+> keeping: (1) **never overwrite** — a destination that is already taken is refused before
+> anything is written, because a silent overwrite is the one outcome a file manager must never
+> produce, and a batch is pre-flighted so a partial failure is reported as "2 of 3 done"
+> rather than "Done"; (2) **a UNC path is refused by the trash** — `shell.trashItem` does not
+> fail on `\\server\share`, it deletes the file permanently and reports success, so the app
+> refuses and says "Nothing was deleted" instead of promising a Recycle Bin it cannot use.
+> `state.selected` stays the LEAD item and `state.selection` holds the rest, so the hundred
+> places that read the lead kept working while batch operations gained a set to act on.
+> The file clipboard is app-local (`state.clipboard`), not the system one: Windows needs
+> CF_HDROP for that, which Electron cannot write before v44. Live refresh watches **exactly
+> the folders on screen** rather than a drive — Windows has a limited number of change
+> handles and a recursive whole-drive watch exhausts them and then stops reporting silently.
+
 > **Build note:** 2026-10-06 — **A public-repo leak, and the gate that prevents a repeat.** Production
 > naming from private work was typed into a test fixture in this public repository (`scripts/build-preview.py`,
 > added with the media-stepping work). It reached two commits, was force-pushed away, and was then found

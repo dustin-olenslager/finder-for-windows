@@ -54,6 +54,12 @@ contextBridge.exposeInMainWorld('finder', {
   copyText: (text) => ipcRenderer.invoke('copy-text', text),
 
   /**
+   * Copy or move a selection into a folder. Goes through the main process because the
+   * renderer has no filesystem access, and a batch needs to report per-item results.
+   */
+  transfer: (request) => ipcRenderer.invoke('transfer', request),
+
+  /**
    * Set the interface scale. Goes through the main process because Chromium's page zoom
    * lives on the webContents, and it is the only mechanism that scales an interface
    * whose stylesheet is written in px.
@@ -88,6 +94,23 @@ contextBridge.exposeInMainWorld('finder', {
     const listener = (_event, progress) => callback(progress)
     ipcRenderer.on('index-progress', listener)
     return () => ipcRenderer.removeListener('index-progress', listener)
+  },
+
+  /**
+   * Tell the main process which folders are on screen, so it watches exactly those and
+   * no more. Returns how many it is watching, which is worth knowing when a folder
+   * cannot be watched.
+   */
+  watchFolders: (paths) => ipcRenderer.invoke('watch-folders', paths),
+
+  /**
+   * A folder on screen changed on disk. Returns an unsubscribe function, so the renderer
+   * never sees the raw ipcRenderer.
+   */
+  onFoldersChanged: (callback) => {
+    const listener = () => callback()
+    ipcRenderer.on('folders-changed', listener)
+    return () => ipcRenderer.removeListener('folders-changed', listener)
   },
 
   // ---- tags ---------------------------------------------------------------

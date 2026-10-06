@@ -82,6 +82,7 @@ function createContainer() {
 
     getPreview: (filePath, name) => getPreview({ fileReader }, filePath, name),
     performFileOperation: (request) => performFileOperation({ fileOperations }, request),
+    transfer: (request) => transferFiles({ fileOperations }, request),
 
     // ---- search -----------------------------------------------------------
     search: (request) => searchIndex({ store }, request ?? {}),
@@ -131,6 +132,67 @@ function createContainer() {
   }
 }
 
+/**
+ * Watch the folders currently on screen, and tell the renderer when one changes.
+ *
+ * Why a small set rather than a whole-drive watcher: Windows allows only a limited
+ * number of change handles, and a recursive watch of a user's drive exhausts them and
+ * then silently stops reporting. Watching exactly the folders being VIEWED is the
+ * smallest shape that answers the real question — "has what I am looking at changed?" —
+ * and it cannot run out of handles.
+ *
+ * A watcher is deliberately forgiving: a folder that cannot be watched (permissions, a
+ * disconnected network drive) is skipped rather than crashing the app, and the listing
+ * still refreshes on demand.
+ */
+function createFolderWatcher(onChange) {
+  const watchers = new Map()
+  let debounce = null
+
+  const fire = () => {
+    // Editors write a file in several steps; a single change can arrive as five events.
+    // Coalescing keeps the UI from re-listing the folder five times in a row.
+    if (debounce) clearTimeout(debounce)
+    debounce = setTimeout(() => {
+      debounce = null
+      onChange()
+    }, 250)
+  }
+
+  return {
+    /** Watch exactly this set of folders, dropping any that are no longer on screen. */
+    set(paths) {
+      const wanted = new Set((paths || []).filter(Boolean))
+      for (const [watched, watcher] of watchers) {
+        if (!wanted.has(watched)) {
+          watcher.close()
+          watchers.delete(watched)
+        }
+      }
+      for (const target of wanted) {
+        if (watchers.has(target)) continue
+        try {
+          // persistent:false so a watcher never holds the app open after the window closes.
+          const watcher = fs.watch(target, { persistent: false }, fire)
+          watcher.on('error', () => {
+            watcher.close()
+            watchers.delete(target)
+          })
+          watchers.set(target, watcher)
+        } catch {
+          // A folder that cannot be watched is not an error worth showing: the listing
+          // still refreshes by hand.
+        }
+      }
+    },
+    close() {
+      if (debounce) clearTimeout(debounce)
+      for (const watcher of watchers.values()) watcher.close()
+      watchers.clear()
+    }
+  }
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1180,
@@ -160,10 +222,16 @@ function createWindow() {
     shell.openExternal(url)
     return { action: 'deny' }
   })
+
+  return win
 }
 
 app.whenReady().then(() => {
   const container = createContainer()
+  const watcher = createFolderWatcher(() => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (win && !win.isDestroyed()) win.webContents.send('folders-changed')
+  })
 
   // The IPC boundary. The renderer never touches the filesystem: it calls these
   // channels, which delegate to a use case, which depends only on a port.
@@ -175,6 +243,13 @@ app.whenReady().then(() => {
   ipcMain.handle('path-segments', (_event, dirPath) => container.pathSegments(dirPath))
   ipcMain.handle('get-preview', (_event, filePath, name) => container.getPreview(filePath, name))
   ipcMain.handle('file-operation', (_event, request) => container.performFileOperation(request))
+  // The renderer says which folders are on screen; the main process watches exactly those
+  // and pushes a single 'folders-changed' event when one of them moves.
+  ipcMain.handle('watch-folders', (_event, paths) => {
+    watcher.set(paths)
+    return { ok: true, watching: (paths || []).length }
+  })
+  ipcMain.handle('transfer', (_event, request) => container.transfer(request))
 
   // Search. The scan pushes progress to the window that asked for it, so the UI can
   // show coverage while it runs instead of a spinner with no information in it.
@@ -222,7 +297,8 @@ app.whenReady().then(() => {
     return error ? { ok: false, error } : { ok: true }
   })
 
-  createWindow()
+  const mainWindow = createWindow()
+  mainWindow.on('closed', () => watcher.close())
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

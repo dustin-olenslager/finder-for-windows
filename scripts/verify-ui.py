@@ -560,7 +560,7 @@ with sync_playwright() as p:
         }"""
     )
     check("right-clicking empty space gives the folder commands", bg is not None and any("New Folder" in l for l in bg["labels"]), str(bg))
-    check("an unavailable command is greyed and explains itself", bg["pasteDisabled"] is True and "Coming soon" in (bg["pasteNote"] or ""), str(bg))
+    check("an unavailable command is greyed and explains itself", bg["pasteDisabled"] is True and "Copy or cut something first" in (bg["pasteNote"] or ""), str(bg))
 
     pg.keyboard.press("Escape")
     pg.wait_for_timeout(200)
@@ -886,6 +886,248 @@ with sync_playwright() as p:
 
     pg.click('.sidebar-item:has-text("Home")')
     pg.wait_for_timeout(700)
+
+    # --- multi-select, copy and paste -------------------------------------------
+    # The owner asked for the batch gestures. These are the checks that matter: a
+    # selection of MORE THAN ONE, and a paste that really lands.
+    pg.goto(src.as_uri())
+    pg.wait_for_timeout(600)
+    pg.click('.column[data-index="0"] .row[data-name="Videos"]')
+    pg.wait_for_timeout(500)
+    names = pg.evaluate("() => [...document.querySelectorAll('.column')].pop().querySelectorAll('.row').length")
+    check("the Videos folder lists several takes", names >= 4, str(names))
+
+    # Ctrl+click adds a second item without losing the first.
+    pg.click('.column[data-index="1"] .row[data-name="scene-01-take-01.mp4"]')
+    pg.wait_for_timeout(200)
+    pg.keyboard.down("Control")
+    pg.click('.column[data-index="1"] .row[data-name="scene-01-take-02.mp4"]')
+    pg.keyboard.up("Control")
+    pg.wait_for_timeout(300)
+    sel = pg.evaluate("() => [...document.querySelectorAll('.row.is-selected')].map(r => r.dataset.name)")
+    check("Ctrl+click selects a second item", len(sel) == 2, str(sel))
+    check("both clicked items are selected", set(sel) == {"scene-01-take-01.mp4", "scene-01-take-02.mp4"}, str(sel))
+
+    # Shift+click takes the RANGE between the anchor and the click.
+    pg.click('.column[data-index="1"] .row[data-name="scene-01-take-01_VO.mp4"]')
+    pg.wait_for_timeout(200)
+    pg.keyboard.down("Shift")
+    pg.click('.column[data-index="1"] .row[data-name="scene-01-take-02.mp4"]')
+    pg.keyboard.up("Shift")
+    pg.wait_for_timeout(300)
+    sel = pg.evaluate("() => [...document.querySelectorAll('.row.is-selected')].map(r => r.dataset.name)")
+    # Display order is 03_Approved, notes.txt, take-01_VO, take-01, take-02_VO, take-02 —
+    # so the range from the first take to the last spans four rows.
+    check("Shift+click selects the range between the two", len(sel) == 4, str(sel))
+    check("the range includes the anchor and the target",
+          "scene-01-take-01_VO.mp4" in sel and "scene-01-take-02.mp4" in sel, str(sel))
+    check("the range does NOT reach past the anchor", "notes.txt" not in sel, str(sel))
+
+    # A plain click collapses the selection back to one — otherwise it can never be undone.
+    pg.click('.column[data-index="1"] .row[data-name="scene-01-take-02.mp4"]')
+    pg.wait_for_timeout(300)
+    sel = pg.evaluate("() => [...document.querySelectorAll('.row.is-selected')].map(r => r.dataset.name)")
+    check("a plain click collapses the selection to one", len(sel) == 1, str(sel))
+
+    # Ctrl+A selects the whole folder.
+    pg.keyboard.down("Control"); pg.keyboard.press("a"); pg.keyboard.up("Control")
+    pg.wait_for_timeout(300)
+    total = pg.evaluate("() => [...document.querySelectorAll('.column')].pop().querySelectorAll('.row').length")
+    sel = pg.evaluate("() => document.querySelectorAll('.row.is-selected').length")
+    check("Ctrl+A selects every item in the folder", sel == total, f"{sel} of {total}")
+
+    # Copy, then paste into a different folder, and prove the file ARRIVED.
+    pg.click('.column[data-index="1"] .row[data-name="scene-01-take-01.mp4"]')
+    pg.wait_for_timeout(200)
+    pg.keyboard.down("Control"); pg.keyboard.press("c"); pg.keyboard.up("Control")
+    pg.wait_for_timeout(400)
+    check("copying says so", pg.evaluate("() => (document.querySelector('.toast')?.textContent || '').includes('copied')"))
+    check("the clipboard hint appears", pg.evaluate("() => !document.getElementById('pasteHint').hidden"))
+    hint = pg.evaluate("() => document.getElementById('pasteHint').textContent")
+    check("the hint names how many items are held", "1 copied" in hint, hint)
+
+    # The copied row is marked, so a copy and a cut are not confusable.
+    check("the copied row is marked as on the clipboard",
+          pg.evaluate("() => document.querySelectorAll('.row.is-clipped').length") == 1)
+
+    pg.click('.column[data-index="0"] .row[data-name="Projects"]')
+    pg.wait_for_timeout(500)
+    pg.keyboard.down("Control"); pg.keyboard.press("v"); pg.keyboard.up("Control")
+    pg.wait_for_timeout(500)
+    landed = pg.evaluate("() => [...document.querySelectorAll('.column')].pop().querySelectorAll('.row').length")
+    check("pasting puts the item in the folder being viewed", landed == 5, str(landed))
+    transferred = pg.evaluate("() => (window.__transfers || [])")
+    check("the paste really reached the file layer", len(transferred) == 1, str(transferred))
+    check("it was a copy, not a move", transferred and transferred[0]["op"] == "copy", str(transferred))
+    check("the copied file is now in the destination",
+          pg.evaluate("() => [...document.querySelectorAll('.column')].pop().querySelectorAll('.row')")
+          and any(r for r in pg.evaluate("() => [...[...document.querySelectorAll('.column')].pop().querySelectorAll('.row')].map(r => r.dataset.name)") if r == "scene-01-take-01.mp4"))
+
+    # Cutting dims the row and the paste MOVES it.
+    pg.click('.column[data-index="0"] .row[data-name="Videos"]')
+    pg.wait_for_timeout(500)
+    pg.click('.column[data-index="1"] .row[data-name="scene-01-take-02_VO.mp4"]')
+    pg.wait_for_timeout(200)
+    pg.keyboard.down("Control"); pg.keyboard.press("x"); pg.keyboard.up("Control")
+    pg.wait_for_timeout(400)
+    check("a cut row is marked differently from a copied one",
+          pg.evaluate("() => document.querySelectorAll('.row.is-cut').length") == 1)
+    cut_hint = pg.evaluate("() => document.getElementById('pasteHint').textContent")
+    check("the hint says cut, not copied", "cut" in cut_hint, cut_hint)
+
+    pg.click('.column[data-index="0"] .row[data-name="Documents"]')
+    pg.wait_for_timeout(500)
+    before = pg.evaluate("() => [...document.querySelectorAll('.column')].pop().querySelectorAll('.row').length")
+    pg.keyboard.down("Control"); pg.keyboard.press("v"); pg.keyboard.up("Control")
+    pg.wait_for_timeout(500)
+    after = pg.evaluate("() => [...document.querySelectorAll('.column')].pop().querySelectorAll('.row').length")
+    check("cutting and pasting adds the item to the destination", after == before + 1, f"{before} -> {after}")
+    ops = pg.evaluate("() => (window.__transfers || []).map(t => t.op)")
+    check("the paste was a move, because the item was cut", ops[-1] == "move", str(ops))
+
+    # Pasting with an empty clipboard must not claim success.
+    pg.evaluate("() => { window.__finderState = null }")
+    pg.reload()
+    pg.wait_for_timeout(600)
+    pg.keyboard.down("Control"); pg.keyboard.press("v"); pg.keyboard.up("Control")
+    pg.wait_for_timeout(400)
+    toast = pg.evaluate("() => document.querySelector('.toast')?.textContent || ''")
+    check("pasting nothing reports it, rather than doing nothing silently",
+          "copied yet" in toast or "nothing" in toast.lower(), toast)
+
+    # --- live refresh -----------------------------------------------------------
+    # The folder you are looking at must notice a change on its own, and must NOT throw
+    # away the selection when it does.
+    pg.goto(src.as_uri())
+    pg.wait_for_timeout(600)
+    watched = pg.evaluate("() => window.__watched || []")
+    check("the app watches the folder on screen", len(watched) == 1, str(watched))
+    check("it watches the right folder", watched and watched[0].endswith("dustin"), str(watched))
+
+    pg.click('.column[data-index="0"] .row[data-name="Videos"]')
+    pg.wait_for_timeout(500)
+    watched = pg.evaluate("() => window.__watched || []")
+    check("opening a folder adds it to the watch list", len(watched) == 2, str(watched))
+
+    # Select something, then have the folder change underneath.
+    pg.click('.column[data-index="1"] .row[data-name="scene-01-take-01.mp4"]')
+    pg.wait_for_timeout(300)
+    before = pg.evaluate("() => document.querySelector('.row.is-selected')?.dataset.name || null")
+
+    pg.evaluate("""() => {
+        // A new file appears, as it would when another program saves one.
+        const cols = [...document.querySelectorAll('.column')];
+        window.__inject = true;
+    }""")
+    pg.evaluate("() => window.__fireFoldersChanged && window.__fireFoldersChanged()")
+    pg.wait_for_timeout(600)
+    after = pg.evaluate("() => document.querySelector('.row.is-selected')?.dataset.name || null")
+    check("a live refresh keeps the selection", after == before, f"{before} -> {after}")
+    check("a live refresh does not throw", pg.evaluate("() => true"))
+
+    # F5 refreshes by hand, for the folders a watcher cannot cover.
+    pg.keyboard.press("F5")
+    pg.wait_for_timeout(500)
+    check("F5 refreshes without an error", pg.evaluate("() => document.querySelectorAll('.column').length") >= 2)
+
+    # --- tags -------------------------------------------------------------------
+    # The tag store has existed since early on with no way to reach it. These checks
+    # prove it is now visible AND that applying a tag actually writes one.
+    pg.goto(src.as_uri())
+    pg.wait_for_timeout(700)
+
+    check("the sidebar has a Tags section", pg.evaluate("() => [...document.querySelectorAll('.sidebar-heading')].some(h => h.textContent === 'Tags')"))
+    check("the Tags section says tags are app-only",
+          pg.evaluate("() => [...document.querySelectorAll('.sidebar-note')].some(n => /this app only/i.test(n.textContent))"))
+    empty = pg.evaluate("() => document.querySelector('.sidebar-empty')?.textContent || ''")
+    check("an empty tag list says how to make one", "Right-click" in empty, empty)
+
+    # Tag a file through the context menu.
+    pg.click('.column[data-index="0"] .row[data-name="logo.png"]')
+    pg.wait_for_timeout(300)
+    pg.click('.column[data-index="0"] .row[data-name="logo.png"]', button="right")
+    pg.wait_for_timeout(400)
+    labels = pg.evaluate("() => [...document.querySelectorAll('.menu-panel [role=menuitem], .menu-panel button, .menu-panel div')].map(e => e.textContent)")
+    check("the item menu offers Tags", any("Tags" in l for l in labels), str(labels[:14]))
+
+    pg.evaluate("""() => {
+        const entry = [...document.querySelectorAll('.menu-panel *')].find(e => /^Tags/.test(e.textContent.trim()));
+        if (entry) entry.click();
+    }""")
+    pg.wait_for_timeout(500)
+    colors = pg.evaluate("() => [...document.querySelectorAll('.menu-panel .menu-entry')].map(b => b.textContent.trim()).filter(t => /^(Red|Orange|Yellow|Green|Blue|Purple|Gray)/.test(t))")
+    check("the picker offers the seven tags", len(colors) == 7, str(colors))
+
+    # Apply one, and prove it reached the store.
+    pg.evaluate("""() => {
+        const entry = [...document.querySelectorAll('.menu-panel *')].find(e => /^Green/.test(e.textContent.trim()));
+        if (entry) entry.click();
+    }""")
+    pg.wait_for_timeout(700)
+    stored = pg.evaluate("() => Object.keys(window.__tags || {})")
+    check("applying a tag writes it to the store", stored == ["Green"], str(stored))
+    held = pg.evaluate("() => (window.__tags || {}).Green || []")
+    check("the store holds the tagged file's path", any("logo.png" in p for p in held), str(held))
+
+    # The sidebar now lists it with a count.
+    listed = pg.evaluate("() => [...document.querySelectorAll('.tag-item')].map(b => b.textContent.trim())")
+    check("the tag appears in the sidebar", any(l.startswith("Green") for l in listed), str(listed))
+    counts = pg.evaluate("() => [...document.querySelectorAll('.tag-count')].map(c => c.textContent)")
+    check("the tag shows how many files carry it", counts == ["1"], str(counts))
+    check("the tag has a color dot", pg.evaluate("() => document.querySelectorAll('.tag-dot').length") >= 1)
+
+    # Clicking it shows the tagged files.
+    pg.evaluate("""() => {
+        const button = [...document.querySelectorAll('.tag-item')].find(b => /Green/.test(b.textContent));
+        if (button) button.click();
+    }""")
+    pg.wait_for_timeout(700)
+    shown = pg.evaluate("() => [...document.querySelectorAll('.row')].map(r => r.dataset.name)")
+    check("clicking a tag shows ONLY its files", shown == ["logo.png"], str(shown))
+
+    # Clicking again returns to the folder.
+    pg.evaluate("""() => {
+        const button = [...document.querySelectorAll('.tag-item')].find(b => /Green/.test(b.textContent));
+        if (button) button.click();
+    }""")
+    pg.wait_for_timeout(700)
+    back = pg.evaluate("() => [...document.querySelectorAll('.row')].map(r => r.dataset.name)")
+    check("clicking the active tag again returns to the folder", len(back) > 1, str(back))
+
+    # --- Quick Look walks the folder (FR-009) ------------------------------------
+    # The overlay used to move the selection and leave the old file on screen, so the
+    # arrows looked dead. Walking must also cross NON-media files, because Quick Look is
+    # a look at the folder, not a slideshow of the pictures in it.
+    pg.goto(src.as_uri())
+    pg.wait_for_timeout(700)
+    pg.click('.column[data-index="0"] .row[data-name="notes.md"]')
+    pg.wait_for_timeout(300)
+    pg.keyboard.press("Space")
+    pg.wait_for_timeout(600)
+    check("Quick Look opens on the selected file",
+          "notes.md" in pg.evaluate("() => document.querySelector('.quicklook')?.textContent || ''"))
+
+    pg.keyboard.press("ArrowRight")
+    pg.wait_for_timeout(600)
+    after = pg.evaluate("() => document.querySelector('.quicklook')?.textContent || ''")
+    check("the right arrow moves Quick Look to another file", "notes.md" not in after, after[:60])
+    check("Quick Look stays open while stepping",
+          pg.evaluate("() => !!document.querySelector('.quicklook') && !document.querySelector('.quicklook').hidden"))
+
+    pg.keyboard.press("ArrowLeft")
+    pg.wait_for_timeout(600)
+    back = pg.evaluate("() => document.querySelector('.quicklook')?.textContent || ''")
+    check("the left arrow comes back", "notes.md" in back, back[:60])
+
+    # Walking past the end must say so, not do nothing.
+    for _ in range(20):
+        pg.keyboard.press("ArrowRight")
+        pg.wait_for_timeout(120)
+    pg.wait_for_timeout(400)
+    end_toast = pg.evaluate("() => document.querySelector('.toast')?.textContent || ''")
+    check("stepping past the last file says so", "last file" in end_toast, end_toast)
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(300)
 
     # Recomputed at the very end, after everything above has moved the UI around.
     leaked = hidden_but_visible()

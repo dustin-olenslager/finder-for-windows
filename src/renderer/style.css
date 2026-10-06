@@ -1134,3 +1134,71 @@ body.has-preview .preview {
 
 .list-sort:hover { color: var(--fg); text-decoration: underline; }
 .list-sort[aria-sort='ascending'], .list-sort[aria-sort='descending'] { color: var(--fg); }
+
+/* --- Multi-select and the file clipboard ------------------------------------- */
+
+/* A cut row is dimmed and a copied row is tinted: the two must not look alike, or you
+   cannot tell whether Ctrl+V is about to copy or move your files. */
+.row.is-clipped, .icon-cell.is-clipped { background: var(--accent-soft, rgba(64, 128, 255, 0.10)); }
+.row.is-cut, .icon-cell.is-cut { opacity: 0.55; }
+.row.is-cut .name, .icon-cell.is-cut .name { text-decoration: line-through; }
+
+.pastebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--accent-soft, rgba(64, 128, 255, 0.10));
+  color: var(--fg);
+  font-size: 12px;
+  flex: none;
+}
+
+.pastebar[hidden] { display: none; }
+
+/* --- Tags -------------------------------------------------------------------- */
+
+.sidebar-note {
+  margin: -2px 0 6px 12px;
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-style: italic;
+}
+
+.sidebar-empty {
+  padding: 4px 12px;
+  color: var(--fg-dim);
+  font-size: 12px;
+}
+
+.tag-item { display: flex; align-items: center; gap: 8px; }
+
+.tag-count {
+  margin-left: auto;
+  color: var(--fg-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The dot carries the tag's color, so two tags are told apart at a glance. */
+.tag-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--fg-dim);
+}
+.tag-red { background: #ff453a; }
+.tag-orange { background: #ff9f0a; }
+.tag-yellow { background: #ffd60a; }
+.tag-green { background: #32d74b; }
+.tag-blue { background: #0a84ff; }
+.tag-purple { background: #bf5af2; }
+.tag-gray { background: #8e8e93; }
+
+/* The tag row reads as one control: the dot, the name, then the count pulled to the
+   edge. A hover state is what makes a list look finished rather than painted. */
+.tag-item { padding-right: 10px; }
+.tag-item:hover { background: var(--hover, rgba(255, 255, 255, 0.06)); }
+.tag-item.is-active { background: var(--accent-soft, rgba(64, 128, 255, 0.16)); }

@@ -246,3 +246,24 @@ test('a filesystem failure becomes a sentence, not an errno', async () => {
   assert.match(result.error, /permission/)
   assert.ok(!result.error.includes('EACCES'), 'the raw code must not reach the user')
 })
+
+test('a UNC path is refused rather than silently destroyed', async () => {
+  // shell.trashItem DELETES a UNC file permanently and reports success. Refusing is the
+  // only safe answer, and the message must not claim a Recycle Bin.
+  const ops = fakeOps()
+  const result = await performFileOperation(
+    { fileOperations: ops },
+    { op: 'trash', path: '\\\\server\\share\\take-01.mp4' }
+  )
+  assert.equal(result.ok, false)
+  assert.match(result.error, /network location/)
+  assert.match(result.error, /Nothing was deleted/)
+  assert.equal(ops.calls.length, 0, 'nothing may be deleted when the Recycle Bin cannot hold it')
+})
+
+test('a normal local path still goes to the trash', async () => {
+  const ops = fakeOps()
+  const result = await performFileOperation({ fileOperations: ops }, { op: 'trash', path: 'C:\\a\\one.txt' })
+  assert.equal(result.ok, true)
+  assert.deepEqual(ops.calls, [['trash', 'C:\\a\\one.txt']])
+})
