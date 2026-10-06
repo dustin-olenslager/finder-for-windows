@@ -18,7 +18,7 @@ entry to `completed-features.md`.
 
 | # | Item | Area | Initiative | Plan doc | Status | Next step |
 |---|------|------|------------|----------|--------|-----------|
-| 1 | Stand up the app foundation: package.json + toolchain, the four-layer `src/` skeleton, and one end-to-end vertical slice (open a folder, list its contents through the IPC bridge) | app | Finder for Windows — the app | `app/foundation/plan.md` (write it from `_templates/plan.md`; spec first at `app/foundation/spec.md`) | Not started | Run the Algorithm pass, write `docs/agents/app/foundation/spec.md` (with the 4 simulated persona interviews), then `plan.md` with its `Deletion candidates` and `Spec coverage` sections; then create the four `target:` directories and `package.json` on a `feat/foundation` branch off `main`. Do NOT create `src/` directories before the spec and plan exist. |
+| 1 | Stand up the app foundation: package.json + toolchain, the four-layer `src/` skeleton, and one end-to-end vertical slice (open a folder, list its contents through the IPC bridge) | app | Finder for Windows — the app | `app/foundation/plan.md` (write it from `_templates/plan.md`) | Spec written | **Spec is done** (`app/foundation/spec.md`, all 10 decisions resolved, no markers). Next: write `app/foundation/plan.md` from the template — its `Deletion candidates` table and `Spec coverage` section must map every FR-001…FR-038 to a milestone. Then create the four `target:` directories and `package.json` on a `feat/foundation` branch off `main`. Do NOT create `src/` directories before the plan exists. |
 
 **Status vocabulary:** `Not started` · `In progress — milestone N of M` · `Blocked — <on what>` ·
 `In review` · `Done — archiving`.

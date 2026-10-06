@@ -13,3 +13,6 @@ Format: `- YYYY-MM-DD — <what changed, and where>`
 ---
 
 - 2026-10-06 — Adopted the Panoply governance kit: adapted `AGENTS.md` (stack, commands, layer map, STRICT approval), pruned 8 inapplicable rule modules, filled every placeholder, scaffolded `docs/agents/` (roadmap, in-progress, worklog, completed-features, architecture, key-patterns).
+- 2026-10-05 — Recorded all ten owner decisions (D-0001 … D-0010) in `docs/agents/decisions/0001-open-decisions.md`, including two owner overrides of the SME panel (content search in v1; Windows shortcut grammar). Added the durable decision card (`docs/index.html`, published via GitHub Pages) and its rendered PNG.
+- 2026-10-05 — Wrote `docs/agents/app/foundation/spec.md`: goal, 8 user stories each with an independent test, 38 numbered requirements, edge cases, entities, 7 measurable success criteria, assumptions, the SME-panel expert record and 4 simulated persona interviews.
+
