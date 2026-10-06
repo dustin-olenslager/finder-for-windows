@@ -53,6 +53,13 @@ contextBridge.exposeInMainWorld('finder', {
    */
   copyText: (text) => ipcRenderer.invoke('copy-text', text),
 
+  /**
+   * Set the interface scale. Goes through the main process because Chromium's page zoom
+   * lives on the webContents, and it is the only mechanism that scales an interface
+   * whose stylesheet is written in px.
+   */
+  setZoom: (factor) => ipcRenderer.invoke('set-zoom', factor),
+
   /** Escape hatch: show the item in Windows Explorer. */
   revealInExplorer: (target) => ipcRenderer.invoke('reveal-in-explorer', target),
 

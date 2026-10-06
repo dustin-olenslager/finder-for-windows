@@ -123,6 +123,22 @@ window.finder = {
     window.__copied = value;
     return { ok: true, value: window.__copied };
   },
+  // Mirrors the real main-process handler: it validates, records, and reports back the
+  // factor the engine holds. It also APPLIES a CSS zoom, because in the real app
+  // Chromium applies it natively — without that the rendered geometry here would not
+  // change and the layout assertions would be vacuous.
+  async setZoom(factor) {
+    const scale = Number(factor);
+    if (!Number.isFinite(scale) || scale < 0.5 || scale > 3) {
+      return { ok: false, error: 'Unsupported scale.' };
+    }
+    if (window.__zoomShouldFail) {
+      return { ok: false, error: 'Simulated engine refusal.' };
+    }
+    window.__zoomReported = scale;
+    document.documentElement.style.zoom = scale === 1 ? '' : String(scale);
+    return { ok: true, factor: scale };
+  },
   async revealInExplorer() { return { ok: true }; },
   async openWithDefault() { return { ok: true }; },
   async indexStatus() { return INDEX_STATUS; },

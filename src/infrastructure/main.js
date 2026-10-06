@@ -198,6 +198,21 @@ app.whenReady().then(() => {
     // Read back rather than assume: the renderer reports success, and it must be true.
     return { ok: clipboard.readText() === value, value }
   })
+
+  // Interface size. `setZoomFactor` is Chromium's own page zoom: it scales the whole
+  // interface — text, rows, columns, padding, images — in one call. Changing the root
+  // font size instead did nothing, because every size in the stylesheet is in px.
+  ipcMain.handle('set-zoom', (event, factor) => {
+    const scale = Number(factor)
+    if (!Number.isFinite(scale) || scale < 0.5 || scale > 3) {
+      return { ok: false, error: 'Unsupported scale.' }
+    }
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win) return { ok: false, error: 'No window.' }
+    win.webContents.setZoomFactor(scale)
+    // Read back what the engine actually holds, so "applied" is a fact and not a hope.
+    return { ok: true, factor: win.webContents.getZoomFactor() }
+  })
   ipcMain.handle('reveal-in-explorer', (_event, target) => {
     shell.showItemInFolder(target)
     return { ok: true }

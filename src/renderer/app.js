@@ -1771,10 +1771,27 @@ function applyZoom(index) {
   const scale = ZOOM_STEPS[clamped]
   state.zoomIndex = clamped
 
-  // A root font size, not a CSS transform: everything sized in rem scales together and
-  // the layout reflows honestly instead of being magnified into clipped edges.
-  document.documentElement.style.fontSize = `${16 * scale}px`
-  document.body.dataset.zoom = String(scale)
+  // Chromium page zoom via the main process is the primary mechanism: it scales text,
+  // rows, columns, padding and images together. An earlier version set the root font
+  // size and did NOTHING VISIBLE, because every size in the stylesheet is in px.
+  const bridge = window.finder?.setZoom
+  if (typeof bridge === 'function') {
+    Promise.resolve(bridge(scale))
+      .then((outcome) => {
+        // Read back rather than assume: if the engine did not take the factor, say so
+        // and fall back, because a control that silently does nothing is the exact
+        // failure this replaced.
+        if (!outcome || outcome.ok === false || Math.abs(outcome.factor - scale) > 0.001) {
+          applyZoomFallback(scale)
+          showToast('Interface size applied with a fallback — restart the app to make it stick.')
+        }
+      })
+      .catch(() => applyZoomFallback(scale))
+  } else {
+    // No bridge (an older preload, or the render harness): still scale something.
+    applyZoomFallback(scale)
+  }
+
   el.zoomValue.textContent = `${Math.round(scale * 100)}%`
   el.zoomOut.disabled = clamped === 0
   el.zoomIn.disabled = clamped === ZOOM_STEPS.length - 1
@@ -1784,6 +1801,12 @@ function applyZoom(index) {
   } catch {
     /* a private or read-only profile must not break the app */
   }
+}
+
+/** Last resort: CSS zoom on the document root. Chromium implements it, and it scales
+ *  layout, not a picture of the layout. */
+function applyZoomFallback(scale) {
+  document.documentElement.style.zoom = scale === 1 ? '' : String(scale)
 }
 
 function zoomBy(delta) {

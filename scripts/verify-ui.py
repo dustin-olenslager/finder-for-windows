@@ -379,35 +379,85 @@ with sync_playwright() as p:
     dims = pg.evaluate("() => { const i = document.querySelector('.preview-image'); return i ? { w: i.naturalWidth, h: i.naturalHeight } : null }")
     check("an image decodes so its dimensions are knowable", dims and dims["w"] == 10 and dims["h"] == 10, str(dims))
 
-    # --- the interface can be made bigger, visibly ---
-    zoom = pg.evaluate(
-        """() => ({
-            value: document.getElementById('zoomValue').textContent,
-            rootFont: getComputedStyle(document.documentElement).fontSize
-        })"""
-    )
-    check("the toolbar shows the current interface size", zoom["value"] == "100%", str(zoom))
+    # --- the interface can be made bigger, and it MEASURABLY changes ---
+    # The previous version of this check asserted that a font-size property changed,
+    # which passed while nothing on screen moved at all (the stylesheet is in px, so a
+    # root font size scales nothing). It now measures rendered geometry.
+    def measure():
+        return pg.evaluate(
+            """() => {
+                const row = document.querySelector('.row');
+                const bar = document.querySelector('.toolbar');
+                const label = document.querySelector('.zoom-value');
+                return {
+                    zoom: document.getElementById('zoomValue').textContent,
+                    rowH: row ? Math.round(row.getBoundingClientRect().height) : null,
+                    barH: bar ? Math.round(bar.getBoundingClientRect().height) : null,
+                    labelW: label ? Math.round(label.getBoundingClientRect().width) : null,
+                    // What the bridge reported (the harness does not apply it itself),
+                    // and whether the app fell back to CSS zoom.
+                    reported: window.__zoomReported,
+                    cssZoom: document.documentElement.style.zoom || '1'
+                };
+            }"""
+        )
+
+    before = measure()
+    check("the toolbar shows the current interface size", before["zoom"] == "100%", str(before))
 
     pg.click("#zoomIn")
-    pg.wait_for_timeout(300)
-    bigger = pg.evaluate(
-        """() => ({
-            value: document.getElementById('zoomValue').textContent,
-            rootFont: getComputedStyle(document.documentElement).fontSize
-        })"""
+    pg.wait_for_timeout(600)
+    after = measure()
+    check("one click makes the interface bigger", after["zoom"] == "110%", str(after))
+    check(
+        "the interface ACTUALLY grows on screen",
+        after["rowH"] > before["rowH"] and after["barH"] > before["barH"],
+        f"row {before['rowH']} -> {after['rowH']}, bar {before['barH']} -> {after['barH']}",
     )
-    check("one click makes the interface bigger", bigger["value"] == "110%" and bigger["rootFont"] != zoom["rootFont"], str(bigger))
+    check("the requested scale reaches the main process", after["reported"] == 1.1, str(after["reported"]))
+    check("the app applied a real scale, not just a label", after["cssZoom"] == "1.1", str(after["cssZoom"]))
 
-    pg.click("#zoomOut")
-    pg.click("#zoomOut")
-    pg.wait_for_timeout(300)
-    smaller = pg.evaluate("() => document.getElementById('zoomValue').textContent")
-    check("and smaller again", smaller == "90%", smaller)
+    # The safety net: if the engine refuses the factor, the app must still scale rather
+    # than leave the control dead — the exact failure this replaced.
+    pg.evaluate("() => { window.__zoomShouldFail = true; document.documentElement.style.zoom = '' }")
+    pg.click("#zoomIn")
+    pg.wait_for_timeout(700)
+    refused = measure()
+    check(
+        "a refused engine still scales the interface via the fallback",
+        refused["cssZoom"] != "1" and refused["rowH"] > before["rowH"],
+        str(refused),
+    )
+    check("and the fallback tells the user rather than failing silently", pg.evaluate("() => !!document.querySelector('.toast')") is True)
+    pg.evaluate("() => { window.__zoomShouldFail = false }")
 
     pg.keyboard.press("Control+0")
-    pg.wait_for_timeout(300)
-    reset = pg.evaluate("() => document.getElementById('zoomValue').textContent")
-    check("Ctrl+0 returns to actual size", reset == "100%", reset)
+    pg.wait_for_timeout(500)
+
+    pg.click("#zoomOut")
+    pg.wait_for_timeout(600)
+    shrunk = measure()
+    check("and smaller again", shrunk["zoom"] == "90%", str(shrunk))
+    check(
+        "shrinking measurably shrinks the interface",
+        shrunk["rowH"] < after["rowH"],
+        f"row {after['rowH']} -> {shrunk['rowH']}",
+    )
+
+    # The far end of the ladder must be applied too, not clamped somewhere unexpected.
+    # From 90% three steps up is 100 -> 110 -> 125.
+    for _ in range(3):
+        pg.click("#zoomIn")
+        pg.wait_for_timeout(250)
+    big = measure()
+    check("the ladder reaches its larger steps", big["zoom"] == "125%" and big["reported"] == 1.25, str(big))
+    check("and it is visibly larger than actual size", big["rowH"] > before["rowH"], f"{before['rowH']} -> {big['rowH']}")
+
+    pg.keyboard.press("Control+0")
+    pg.wait_for_timeout(600)
+    reset = measure()
+    check("Ctrl+0 returns to actual size", reset["zoom"] == "100%" and reset["reported"] == 1, str(reset))
+    check("and the interface returns to its original size", reset["rowH"] == before["rowH"], f"{before['rowH']} vs {reset['rowH']}")
 
     # --- copying the selected item's path is one click, and it really copies ---
     pg.click('.column[data-index="0"] .row[data-name="logo.png"]')
