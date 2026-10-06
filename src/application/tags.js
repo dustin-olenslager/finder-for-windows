@@ -17,8 +17,16 @@
 const DEFAULT_COLORS = ['red', 'orange', 'yellow', 'green', 'blue', 'purple', 'gray']
 
 function createTagService({ store }) {
-  /** signature(path, size, modifiedAt) -> stable key for a file's identity */
-  const signature = (record) => `${record.path}|${record.size ?? ''}|${record.modifiedAt ?? ''}`
+  /**
+   * signature(record) -> stable key for a file's identity.
+   *
+   * Returns null for a missing record instead of throwing: a caller that sends nothing
+   * should get a refusal it can act on, not "Cannot read properties of undefined".
+   */
+  const signature = (record) => {
+    if (!record || typeof record.path !== 'string' || record.path === '') return null
+    return `${record.path}|${record.size ?? ''}|${record.modifiedAt ?? ''}`
+  }
 
   async function readAll() {
     const state = await store.readState()
@@ -58,6 +66,9 @@ function createTagService({ store }) {
       const state = await store.readState()
       const tags = state.tags ?? {}
       const key = signature(record)
+      // A record with no path cannot be tagged: there is nothing to attach the tag to,
+      // and guessing would write a tag against a key that can never be looked up again.
+      if (!key) return { ok: false, error: 'That item cannot be tagged.' }
       const current = new Set(tags[key] ?? [])
       current.add(name)
       tags[key] = [...current]
@@ -69,6 +80,7 @@ function createTagService({ store }) {
       const state = await store.readState()
       const tags = state.tags ?? {}
       const key = signature(record)
+      if (!key) return { ok: false, error: 'That item cannot be untagged.' }
       const current = (tags[key] ?? []).filter((t) => t !== tagName)
       if (current.length === 0) delete tags[key]
       else tags[key] = current

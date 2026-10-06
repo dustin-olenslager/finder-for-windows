@@ -67,6 +67,12 @@ jobs:
       # Shell script lint — shellcheck if available. Scripts only: `.agents/commands/*.md` are
       # markdown, and linting prose as shell produced SC2148/SC1036/SC2215 noise on every run,
       # which is why this step had never once passed.
+      # ESLint over the source. This is not a style gate — it is the check that catches a
+      # reference to something that does not exist, which is how an undefined
+      # `transferFiles` in the composition root reached a release candidate.
+      - name: Lint (eslint)
+        run: npx eslint src test scripts
+
       - name: Lint (shellcheck)
         run: |
           if command -v shellcheck >/dev/null 2>&1; then

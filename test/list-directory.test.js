@@ -17,7 +17,9 @@ const { assertDirectoryReader } = require('../src/application/ports/directory-re
 /** An in-memory DirectoryReader. */
 function fakeReader(items, { failWith } = {}) {
   return {
-    async read(dirPath) {
+    // The port's signature takes the folder path; this fake ignores it on purpose, so the
+    // underscore marks it as deliberately unused rather than accidentally so.
+    async read(_dirPath) {
       if (failWith) {
         const error = new Error('fake failure')
         error.code = failWith

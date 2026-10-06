@@ -17,6 +17,7 @@ const { listDirectory } = require('../application/list-directory')
 const { getSidebar } = require('../application/get-sidebar')
 const { getPreview } = require('../application/get-preview')
 const { performFileOperation } = require('../application/file-operations')
+const { transferFiles } = require('../application/transfer-files')
 const { createIndexBuilder } = require('../application/build-index')
 const { searchIndex } = require('../application/search-index')
 const { createTagService } = require('../application/tags')
@@ -257,7 +258,11 @@ app.whenReady().then(() => {
   ipcMain.handle('index-status', () => container.indexStatus())
   ipcMain.handle('build-index', (event) =>
     container.buildIndex((progress) => {
-      if (!event.sender.isDestroyed()) event.sender.send('index-progress', progress)
+      // The window can close mid-scan. `event.sender` is also absent when the handler is
+      // invoked without a real webContents (a test, or a stale caller), so both are
+      // checked rather than assuming the sender is there.
+      const sender = event?.sender
+      if (sender && !sender.isDestroyed()) sender.send('index-progress', progress)
     })
   )
   ipcMain.handle('cancel-index', () => container.cancelIndex())
