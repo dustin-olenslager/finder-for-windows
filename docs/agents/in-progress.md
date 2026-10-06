@@ -18,7 +18,7 @@ entry to `completed-features.md`.
 
 | # | Item | Area | Initiative | Plan doc | Status | Next step |
 |---|------|------|------------|----------|--------|-----------|
-| 1 | Build the Finder experience: the shell (sidebar / content / toolbar), selection and keyboard grammar, file operations with undo, the four views, previews, tags, and search with the content index | app | Finder for Windows — the app | `app/foundation/plan.md` | **M2 shipped** | M1 (`fb898ac`) and M2 landed on `main`; `v0.1.0` released, and the drive-root bug the owner hit is fixed with tests. Next: **M3** (selection + keyboard grammar + path bar), then M4 (file operations with undo). |
+| 1 | Build the Finder experience: the shell (sidebar / content / toolbar), selection and keyboard grammar, file operations with undo, the four views, previews, tags, and search with the content index | app | Finder for Windows — the app | `app/foundation/plan.md` | **M5 shipped** | M1–M5 are on `main` and released as `v0.3.0` (shell, column view, previews, Quick Look, keyboard grammar, file operations). Next: **M7 — search and the content index** (tags, M5's remainder, and undo ride with it), then M6 (native bulk enumeration / 100k-file folders) and M8 (packaging polish). |
 
 **Status vocabulary:** `Not started` · `In progress — milestone N of M` · `Blocked — <on what>` ·
 `In review` · `Done — archiving`.
