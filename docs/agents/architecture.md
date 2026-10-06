@@ -6,10 +6,58 @@ change it back.
 
 ## System shape
 
-_Not written yet — the app has no code. This section is filled by the first plan that builds the
-skeleton (`docs/agents/app/foundation/plan.md`), and it must state the four layers, the ports, and the
-composition root. Until then the authoritative shape is the layer map in `AGENTS.md` → "Layers" and
-`.agents/rules/clean-architecture.md` → "This project's layers"._
+The app is an Electron desktop application in four layers, with dependencies pointing inward:
+
+```
+src/domain          file-item value types, tag rules, view-state rules, query parsing (no I/O)
+src/application     the use cases (ListDirectory, …) and the PORT interfaces they declare
+src/adapters        port implementations (fs reader, IPC handlers), DTO mappers
+src/infrastructure  Electron main, the composition root, config
+src/preload         the single bridge between renderer and main
+src/renderer        presentation and view state only
+```
+
+- **The composition root** is `src/infrastructure/main.js` (`createContainer()`). It is the only
+  module that knows both a port and its concrete adapter.
+- **Ports implemented so far:** `DirectoryReader` (declared in
+  `src/application/ports/directory-reader.js`, implemented by
+  `src/adapters/fs-directory-reader.js`).
+- **IPC contract:** one channel per use case, invoked through the preload bridge. `list-directory`
+  returns `{ ok, path, items }` or `{ ok:false, path, error }` — it never rejects across the boundary,
+  so the renderer always has a string to render.
+
+### ADR-0001 — Build on `main` without pull requests
+
+- **Date:** 2026-10-05
+- **Status:** Accepted
+- **Context:** The repo's standing rule is one branch, one PR, squash-merge. The owner asked for the
+  app to be built end-to-end and delivered as an installer he can test, explicitly without pull
+  requests.
+- **Options considered:** (a) keep the branch-and-PR flow and hand him PR links — rejected, he does
+  not want them; (b) drop the kit's gates along with the PRs — rejected, the gates are what stop a
+  wrong change; (c) keep every gate and every artifact, and land on `main` directly.
+- **Decision:** (c). Commits go to `main` directly; the spec, plan, tests, worklog, and the kit's
+  checks still apply on every change.
+- **Consequences:** the review step that a PR provided is gone, so the automated gates and the test
+  suite carry that weight. **Revisit when the owner says so** — restore branch + PR and this ADR is
+  marked Superseded.
+
+### ADR-0002 — The Windows installer is built by GitHub Actions, not locally
+
+- **Date:** 2026-10-05
+- **Status:** Accepted
+- **Context:** The dev box is Linux, has no `wine`, and runs as an unprivileged user, so
+  `electron-builder` cannot produce the NSIS target there. The owner's machine is Windows on ARM64.
+- **Options considered:** (a) install wine — needs root, and wine's reliability for the NSIS + rcedit
+  path is poor; (b) build on the owner's machine — he would have to install a toolchain before he can
+  test anything; (c) build on a GitHub-hosted Windows runner and publish the artifacts.
+- **Decision:** (c). `.github/workflows/build-windows.yml` builds arm64 and x64 in parallel on
+  `windows-latest` and uploads both installers and both portable executables. A version tag or a
+  manual dispatch runs it.
+- **Consequences:** every build costs a CI run, and the artifact only exists once CI finishes — but
+  the owner downloads one file and installs it, and no local Windows toolchain is ever required.
+  `electron-builder.yml` must keep `publish: null`; without it, electron-builder detects CI and tries
+  to publish a release, which fails without a token.
 
 ## Boundaries and ownership
 
