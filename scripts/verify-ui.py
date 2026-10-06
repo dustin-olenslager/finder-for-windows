@@ -40,7 +40,9 @@ with sync_playwright() as p:
     s = state(pg)
     check("one column on first paint", s["columns"] == 1, str(s["columns"]))
     check("every item is listed", s["rowsPerColumn"] == [11], str(s["rowsPerColumn"]))
-    check("status counts items and folders", s["status"] == "11 items · 6 folders", s["status"])
+    # First paint selects the first FILE, so the status bar also reports its size.
+    check("status counts items and folders", s["status"].startswith("11 items · 6 folders"), s["status"])
+    check("status reports the selected file's size", "selected:" in s["status"], s["status"])
     check("title is the folder name", s["title"] == "dustin", s["title"])
     check("back disabled at start", s["backDisabled"] is True)
     check("up enabled (home has a parent)", s["upDisabled"] is False)
@@ -139,8 +141,6 @@ with sync_playwright() as p:
     # --- the preview pane opens and shows a text preview ---
     pg.click('.column[data-index="0"] .row[data-name="notes.md"]')
     pg.wait_for_timeout(400)
-    pg.keyboard.press("Control+i")
-    pg.wait_for_timeout(500)
     pv = pg.evaluate("""() => ({
         open: document.body.classList.contains('has-preview'),
         name: document.getElementById('previewName').textContent,
@@ -148,7 +148,7 @@ with sync_playwright() as p:
         hasText: !!document.querySelector('#previewBody .preview-text'),
         text: document.querySelector('#previewBody .preview-text')?.textContent.slice(0, 20) || ''
     })""")
-    check("Ctrl+I opens the preview pane", pv["open"] is True)
+    check("the preview pane is open", pv["open"] is True)
     check("preview names the file", pv["name"] == "notes.md", pv["name"])
     check("preview reports kind and size", "Text" in pv["meta"] and "KB" in pv["meta"], pv["meta"])
     check("a text file previews its content", pv["hasText"] and "Finder for Windows" in pv["text"], pv["text"])

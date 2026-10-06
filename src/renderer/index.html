@@ -11,6 +11,14 @@
        (see titleBarOverlay in main.js), so this row is pure drag space. -->
   <div class="titlebar"></div>
 
+  <!-- A real menu bar: every feature must be findable without knowing a shortcut. -->
+  <nav class="menubar" id="menubar" aria-label="Menu">
+    <button class="menubar-item" data-menu="file">File</button>
+    <button class="menubar-item" data-menu="view">View</button>
+    <button class="menubar-item" data-menu="go">Go</button>
+    <button class="menubar-item" data-menu="help">Help</button>
+  </nav>
+
   <header class="toolbar">
     <div class="toolbar-left">
       <button id="back" class="icon-btn" title="Back" aria-label="Back">
@@ -42,7 +50,15 @@
       <label class="search">
         <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10.4 10.4 14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         <input id="search" type="search" placeholder="Search" autocomplete="off" spellcheck="false" aria-label="Search this folder">
+        <button type="button" class="search-clear" id="searchClear" title="Clear search" aria-label="Clear search" hidden>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.4" fill="currentColor" opacity=".22"/><path d="M5.8 5.8l4.4 4.4M10.2 5.8l-4.4 4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
       </label>
+
+      <!-- Visible toggle, so the preview is discoverable rather than a hidden shortcut. -->
+      <button id="previewToggle" class="icon-btn is-on" title="Show preview" aria-label="Show preview" aria-pressed="true">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.6" y="3" width="12.8" height="10" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M9.8 3v10" stroke="currentColor" stroke-width="1.4"/></svg>
+      </button>
     </div>
   </header>
 

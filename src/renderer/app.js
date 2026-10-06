@@ -27,7 +27,9 @@ const el = {
   previewBody: document.getElementById('previewBody'),
   previewName: document.getElementById('previewName'),
   previewMeta: document.getElementById('previewMeta'),
+  previewToggle: document.getElementById('previewToggle'),
   previewClose: document.getElementById('previewClose'),
+  searchClear: document.getElementById('searchClear'),
   quicklook: document.getElementById('quicklook'),
   quicklookBody: document.getElementById('quicklookBody'),
   quicklookName: document.getElementById('quicklookName'),
@@ -45,7 +47,9 @@ const state = {
   filter: '',
   selected: null, // { name, isDirectory, kind, path }
   activeSidebar: null,
-  previewOpen: false,
+  // ON by default. A preview nobody can find is not a feature: the first version only
+  // opened it on a shortcut, so the owner saw no previews at all.
+  previewOpen: true,
   quickLookOpen: false
 }
 
@@ -939,6 +943,232 @@ function showToast(message) {
 }
 
 // ---------------------------------------------------------------------------
+// Menu bar
+// ---------------------------------------------------------------------------
+
+/** The whole menu, in one place, so nothing exists only as a shortcut. */
+const MENUS = {
+  file: {
+    label: 'File',
+    items: [
+      { label: 'New Folder', accel: 'Ctrl+Shift+N', run: createFolder },
+      { label: 'Rename…', accel: 'F2', run: renameSelected },
+      { label: 'Move to Recycle Bin', accel: 'Delete', run: trashSelected },
+      { separator: true },
+      { label: 'Open', accel: 'Enter', run: openSelected },
+      { label: 'Open in Windows Explorer', run: revealSelected }
+    ]
+  },
+  view: {
+    label: 'View',
+    items: [
+      { label: 'as Columns', accel: 'Ctrl+1', run: () => setView('column') },
+      { label: 'as List', accel: 'Ctrl+2', run: () => setView('list') },
+      { label: 'as Icons', accel: 'Ctrl+3', run: () => setView('icon') },
+      { separator: true },
+      { label: 'Show Preview', accel: 'Ctrl+I', run: () => setPreviewOpen(!state.previewOpen) },
+      { label: 'Quick Look', accel: 'Space', run: openQuickLook },
+      { separator: true },
+      { label: 'Search This Folder', accel: 'Ctrl+F', run: () => { el.search.focus(); el.search.select() } }
+    ]
+  },
+  go: {
+    label: 'Go',
+    items: [
+      { label: 'Back', accel: 'Backspace', run: goBack },
+      { label: 'Forward', accel: 'Alt+→', run: goForward },
+      { label: 'Enclosing Folder', accel: 'Alt+↑', run: goUp },
+      { separator: true },
+      { label: 'Home', run: () => goToKnown('home') },
+      { label: 'Desktop', run: () => goToKnown('desktop') },
+      { label: 'Documents', run: () => goToKnown('documents') },
+      { label: 'Downloads', run: () => goToKnown('downloads') },
+      { label: 'Pictures', run: () => goToKnown('pictures') }
+    ]
+  },
+  help: {
+    label: 'Help',
+    items: [{ label: 'Keyboard Shortcuts', run: showShortcuts }]
+  }
+}
+
+let openMenu = null
+
+function closeMenu() {
+  if (!openMenu) return
+  openMenu.remove()
+  openMenu = null
+  for (const item of document.querySelectorAll('.menubar-item')) item.classList.remove('is-open')
+}
+
+function toggleMenu(name, anchor) {
+  const alreadyOpen = openMenu?.dataset.menu === name
+  closeMenu()
+  if (alreadyOpen) return
+
+  const menu = MENUS[name]
+  if (!menu) return
+
+  const panel = document.createElement('div')
+  panel.className = 'menu-panel'
+  panel.dataset.menu = name
+
+  for (const entry of menu.items) {
+    if (entry.separator) {
+      const line = document.createElement('div')
+      line.className = 'menu-separator'
+      panel.append(line)
+      continue
+    }
+
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'menu-entry'
+
+    const label = document.createElement('span')
+    label.textContent = entry.label
+    button.append(label)
+
+    if (entry.accel) {
+      const accel = document.createElement('span')
+      accel.className = 'menu-accel'
+      accel.textContent = entry.accel
+      button.append(accel)
+    }
+
+    // A checked mark for the two items whose state is visible.
+    if (
+      (entry.label === 'Show Preview' && state.previewOpen) ||
+      (entry.label === 'as Columns' && state.view === 'column') ||
+      (entry.label === 'as List' && state.view === 'list') ||
+      (entry.label === 'as Icons' && state.view === 'icon')
+    ) {
+      button.classList.add('is-checked')
+    }
+
+    button.addEventListener('click', async () => {
+      closeMenu()
+      await entry.run()
+    })
+    panel.append(button)
+  }
+
+  const box = anchor.getBoundingClientRect()
+  panel.style.left = `${Math.round(box.left)}px`
+  panel.style.top = `${Math.round(box.bottom + 2)}px`
+  document.body.append(panel)
+  anchor.classList.add('is-open')
+  openMenu = panel
+}
+
+async function goToKnown(id) {
+  const sidebar = await window.finder.getSidebar()
+  for (const section of sidebar.sections) {
+    const match = section.items.find((i) => i.id === id)
+    if (match?.path) return openFolder(match.path)
+  }
+  showToast('That folder is not on this machine.')
+}
+
+async function openSelected() {
+  if (!state.selected) return
+  const path = state.selected.path || (await window.finder.joinPath(activePath(), state.selected.name))
+  if (state.selected.isDirectory) {
+    const index = state.columns.findIndex((c) => c.selectedName === state.selected.name)
+    await descend(index === -1 ? state.columns.length - 1 : index, state.selected)
+  } else {
+    await window.finder.openWithDefault(path)
+  }
+}
+
+async function revealSelected() {
+  if (!state.selected) return
+  const path = state.selected.path || (await window.finder.joinPath(activePath(), state.selected.name))
+  await window.finder.revealInExplorer(path)
+}
+
+function setView(view) {
+  state.view = view
+  for (const button of document.querySelectorAll('.seg')) {
+    const active = button.dataset.view === view
+    button.classList.toggle('is-active', active)
+    button.setAttribute('aria-pressed', active ? 'true' : 'false')
+  }
+  render()
+}
+
+function showShortcuts() {
+  const rows = [
+    ['Arrows', 'Move the selection'],
+    ['Space', 'Quick Look'],
+    ['Enter', 'Open'],
+    ['F2', 'Rename'],
+    ['Ctrl+Shift+N', 'New Folder'],
+    ['Delete', 'Move to Recycle Bin'],
+    ['Ctrl+F', 'Search this folder'],
+    ['Ctrl+I', 'Show or hide the preview'],
+    ['Ctrl+1 / 2 / 3', 'Columns / List / Icons'],
+    ['Backspace', 'Back'],
+    ['Alt+← / →', 'Back / Forward'],
+    ['Alt+↑', 'Enclosing folder']
+  ]
+
+  const overlay = document.createElement('div')
+  overlay.className = 'modal'
+  const card = document.createElement('div')
+  card.className = 'modal-card modal-card-wide'
+  const title = document.createElement('h2')
+  title.className = 'modal-title'
+  title.textContent = 'Keyboard Shortcuts'
+  card.append(title)
+
+  const list = document.createElement('dl')
+  list.className = 'shortcut-list'
+  for (const [keys, what] of rows) {
+    const dt = document.createElement('dt')
+    dt.textContent = keys
+    const dd = document.createElement('dd')
+    dd.textContent = what
+    list.append(dt, dd)
+  }
+  card.append(list)
+
+  const actions = document.createElement('div')
+  actions.className = 'modal-actions'
+  const close = document.createElement('button')
+  close.type = 'button'
+  close.className = 'btn-primary'
+  close.textContent = 'Done'
+  close.addEventListener('click', () => overlay.remove())
+  actions.append(close)
+  card.append(actions)
+
+  overlay.append(card)
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) overlay.remove()
+  })
+  document.body.append(overlay)
+  close.focus()
+}
+
+for (const button of document.querySelectorAll('.menubar-item')) {
+  button.addEventListener('click', (event) => {
+    event.stopPropagation()
+    toggleMenu(button.dataset.menu, button)
+  })
+  // Hovering another menu while one is open switches to it, as a menu bar should.
+  button.addEventListener('mouseenter', () => {
+    if (openMenu && openMenu.dataset.menu !== button.dataset.menu) {
+      toggleMenu(button.dataset.menu, button)
+    }
+  })
+}
+
+document.addEventListener('click', (event) => {
+  if (openMenu && !openMenu.contains(event.target)) closeMenu()
+})
+
+// ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
 
@@ -984,24 +1214,37 @@ el.back.addEventListener('click', goBack)
 el.forward.addEventListener('click', goForward)
 el.up.addEventListener('click', goUp)
 
+/** Clear the folder filter and put the search box back to rest. */
+function clearSearch() {
+  el.search.value = ''
+  state.filter = ''
+  el.searchClear.hidden = true
+  render()
+}
+
 el.search.addEventListener('input', () => {
   state.filter = el.search.value
+  el.searchClear.hidden = state.filter === ''
   render()
 })
+
+el.searchClear.addEventListener('click', clearSearch)
 
 el.search.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') {
-    el.search.value = ''
-    state.filter = ''
-    render()
-  }
+  if (event.key === 'Escape') clearSearch()
 })
 
-el.previewClose.addEventListener('click', () => {
-  state.previewOpen = false
-  document.body.classList.remove('has-preview')
+/** Show or hide the preview pane, and keep the toggle's own state truthful. */
+function setPreviewOpen(open) {
+  state.previewOpen = open
+  document.body.classList.toggle('has-preview', open)
+  el.previewToggle.classList.toggle('is-on', open)
+  el.previewToggle.setAttribute('aria-pressed', open ? 'true' : 'false')
   render()
-})
+}
+
+el.previewToggle.addEventListener('click', () => setPreviewOpen(!state.previewOpen))
+el.previewClose.addEventListener('click', () => setPreviewOpen(false))
 
 el.quicklook.addEventListener('click', (event) => {
   if (event.target === el.quicklook) closeQuickLook()
@@ -1070,9 +1313,10 @@ document.addEventListener('keydown', async (event) => {
     await trashSelected()
   } else if (modifier && event.key === 'i') {
     event.preventDefault()
-    state.previewOpen = !state.previewOpen
-    document.body.classList.toggle('has-preview', state.previewOpen)
-    render()
+    setPreviewOpen(!state.previewOpen)
+  } else if (modifier && (event.key === '1' || event.key === '2' || event.key === '3')) {
+    event.preventDefault()
+    setView({ 1: 'column', 2: 'list', 3: 'icon' }[event.key])
   } else if (modifier && event.key === 'f') {
     event.preventDefault()
     el.search.focus()
@@ -1093,7 +1337,19 @@ document.addEventListener('keydown', async (event) => {
   await renderSidebar()
   state.activeSidebar = start
   state.columns = [await readColumn(start)]
-  render()
+
+  // Select the first FILE (not a folder): the preview pane is open by default, and a
+  // selected folder has nothing to preview, so the pane would read as broken.
+  const items = state.columns[0]?.items ?? []
+  const firstFile = items.find((i) => !i.isDirectory) ?? items[0]
+  document.body.classList.toggle('has-preview', state.previewOpen)
+
+  if (firstFile) {
+    await selectInColumn(0, firstFile.name)
+  } else {
+    render()
+  }
+
   renderSidebar()
   showColumnError(state.columns[0])
 })()

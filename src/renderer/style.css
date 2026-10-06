@@ -171,6 +171,14 @@ body {
 .icon-btn:active:not(:disabled) { background: var(--line); }
 .icon-btn:disabled { color: var(--fg-muted); opacity: 0.45; }
 
+/* A toggle that is ON must look on: the preview pane is only discoverable if the
+   control that governs it shows its own state. */
+.icon-btn.is-on { background: var(--bg-selected); color: #fff; }
+.icon-btn.is-on:hover:not(:disabled) { background: var(--bg-selected); filter: brightness(1.1); }
+
+/* The preview pane's own close button stays neutral even when the pane is open. */
+.preview .icon-btn.is-on { background: transparent; color: var(--fg); }
+
 .icon-btn:focus-visible,
 .seg:focus-visible,
 .sidebar-item:focus-visible,
@@ -240,6 +248,125 @@ body {
 }
 
 .search input::placeholder { color: var(--fg-muted); }
+
+/* ---------------------------------------------------------------- menu bar */
+
+.menubar {
+  height: 26px;
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 8px;
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--line);
+  -webkit-app-region: drag;
+}
+
+.menubar-item {
+  -webkit-app-region: no-drag;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  padding: 0 10px;
+  border-radius: 5px;
+  cursor: default;
+}
+
+.menubar-item:hover,
+.menubar-item.is-open { background: var(--bg-hover); }
+
+.menu-panel {
+  position: fixed;
+  z-index: 60;
+  min-width: 230px;
+  padding: 5px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.32);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.menu-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  height: 26px;
+  padding: 0 9px 0 22px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: default;
+  position: relative;
+}
+
+.menu-entry:hover { background: var(--bg-selected); color: #fff; }
+.menu-entry:hover .menu-accel { color: rgba(255, 255, 255, 0.8); }
+
+/* A tick, not a bullet: it reads as "this is the current setting". */
+.menu-entry.is-checked::before {
+  content: '✓';
+  position: absolute;
+  left: 7px;
+  font-size: 11px;
+}
+
+.menu-accel { color: var(--fg-muted); font-size: 11px; flex: none; }
+
+.menu-separator { height: 1px; margin: 4px 6px; background: var(--line); }
+
+/* ------------------------------------------------------------ search clear */
+
+.search-clear {
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  padding: 0;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+  cursor: default;
+  flex: none;
+}
+
+.search-clear svg { width: 13px; height: 13px; }
+.search-clear:hover { color: var(--fg); }
+.search-clear[hidden] { display: none; }
+
+/* ------------------------------------------------------------- shortcuts */
+
+.modal-card-wide { width: 420px; }
+
+.shortcut-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 18px;
+  margin: 0;
+}
+
+.shortcut-list dt {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--fg);
+  background: var(--bg-hover);
+  border-radius: 4px;
+  padding: 2px 7px;
+  justify-self: start;
+  white-space: nowrap;
+}
+
+.shortcut-list dd { margin: 0; color: var(--fg-muted); font-size: 12px; align-self: center; }
 
 /* -------------------------------------------------------------------- body */
 

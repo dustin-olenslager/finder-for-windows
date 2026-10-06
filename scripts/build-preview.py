@@ -173,6 +173,11 @@ def main():
             "looksBinary": False,
         },
         "pdf": {"ok": True, "mode": "system", "kind": "pdf", "extension": "pdf", "note": "Opens in another app."},
+        "png": {"ok": True, "mode": "image", "kind": "image", "extension": "png"},
+        "jpg": {"ok": True, "mode": "image", "kind": "image", "extension": "jpg"},
+        "jpeg": {"ok": True, "mode": "image", "kind": "image", "extension": "jpeg"},
+        "gif": {"ok": True, "mode": "image", "kind": "image", "extension": "gif"},
+        "webp": {"ok": True, "mode": "image", "kind": "image", "extension": "webp"},
         "xlsx": {"ok": True, "mode": "system", "kind": "spreadsheet", "extension": "xlsx", "note": "No preview for this file type."},
     }
 
