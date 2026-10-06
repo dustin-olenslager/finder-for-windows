@@ -33,6 +33,14 @@ const el = {
   previewNext: document.getElementById('previewNext'),
   previewSteps: document.getElementById('previewSteps'),
   mediaCount: document.getElementById('mediaCount'),
+  sortBtn: document.getElementById('sortBtn'),
+  sortLabel: document.getElementById('sortLabel'),
+  filterBtn: document.getElementById('filterBtn'),
+  filterLabel: document.getElementById('filterLabel'),
+  patternBar: document.getElementById('patternBar'),
+  patternInput: document.getElementById('patternInput'),
+  patternClear: document.getElementById('patternClear'),
+  filterClear: document.getElementById('filterClear'),
   searchClear: document.getElementById('searchClear'),
   scope: document.getElementById('scope'),
   scopeWrap: document.getElementById('scopeWrap'),
@@ -61,6 +69,12 @@ const state = {
   view: 'column',
   columns: [], // [{ path, items, selectedName }] — one entry per Miller column
   filter: '',
+  // How the folder is ordered. Folders stay above files whatever this says.
+  sort: { key: 'name', ascending: true },
+  // Type filter: a SET of kinds, so "video and prompt text" is expressible.
+  kindFilter: new Set(),
+  // A name pattern, for the shot-naming case: "V003" or "_VO" narrows a version folder.
+  pattern: '',
   selected: null, // { name, isDirectory, kind, path }
   activeSidebar: null,
   // ON by default. A preview nobody can find is not a feature: the first version only
@@ -208,10 +222,38 @@ function folderOf(path) {
 }
 
 /** Case-insensitive, and stable so the order never flickers between renders. */
+/**
+ * Which items a folder shows, given the type filter and the name pattern.
+ *
+ * The two are independent: "only video" and "only V003" are different questions and are
+ * often asked together.
+ */
 function applyFilter(items) {
   const needle = state.filter.trim().toLowerCase()
-  if (!needle) return items
-  return items.filter((item) => item.name.toLowerCase().includes(needle))
+  const kinds = state.kindFilter
+  const pattern = state.pattern.trim().toLowerCase()
+
+  return items.filter((item) => {
+    // A folder is never hidden by a TYPE filter: hiding folders makes a folder look
+    // empty when it is not, and there is no way back down the tree.
+    if (kinds.size > 0 && !item.isDirectory) {
+      const kind = item.kind || 'other'
+      if (!kinds.has(kind)) return false
+    }
+
+    if (needle && !item.name.toLowerCase().includes(needle)) return false
+
+    // The pattern matches anywhere in the name, so "V003" finds every version's files
+    // and "_VO" finds the voiceover takes without needing a wildcard.
+    if (pattern && !item.name.toLowerCase().includes(pattern)) return false
+
+    return true
+  })
+}
+
+/** Is any filter narrowing this folder? */
+function isFiltering() {
+  return state.kindFilter.size > 0 || state.pattern.trim() !== ''
 }
 
 /** Folders first, then names — Finder's default ordering. */
@@ -220,6 +262,75 @@ function sortItems(items) {
     if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
     return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
   })
+}
+
+/**
+ * The kinds a folder actually contains, with a count each, ordered the way a person
+ * scans a folder: folders, then images, video, audio, documents, other.
+ *
+ * Only kinds PRESENT are offered, because a filter menu that lists file types this
+ * folder does not contain is a menu of dead ends.
+ */
+const KIND_ORDER = ['folder', 'image', 'video', 'audio', 'pdf', 'text', 'code', 'other']
+
+function kindLabel(kind) {
+  if (kind === 'folder') return 'Folders'
+  if (kind === 'other') return 'Other'
+  return `${kind[0].toUpperCase()}${kind.slice(1)}`
+}
+
+function availableKinds(items) {
+  const counts = new Map()
+  for (const item of items) {
+    const kind = item.isDirectory ? 'folder' : item.kind || 'other'
+    counts.set(kind, (counts.get(kind) || 0) + 1)
+  }
+  return KIND_ORDER.filter((k) => counts.has(k)).map((k) => ({ kind: k, count: counts.get(k) }))
+}
+
+/**
+ * Apply the folder's sort order.
+ *
+ * Folders always stay above files whatever the sort: mixing a folder in among the files
+ * by date is how a file manager stops feeling like one. The sort then applies WITHIN
+ * each group, and every comparison falls back to name so the order is total and never
+ * flickers between renders.
+ */
+function applySort(items) {
+  const { key, ascending } = state.sort
+  const dir = ascending ? 1 : -1
+
+  return items.slice().sort((a, b) => {
+    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+
+    let result = 0
+    if (key === 'kind') {
+      const ka = a.isDirectory ? 'folder' : a.kind || 'other'
+      const kb = b.isDirectory ? 'folder' : b.kind || 'other'
+      result = KIND_ORDER.indexOf(ka) - KIND_ORDER.indexOf(kb)
+    } else if (key === 'size') {
+      // An unknown size sorts below a known one rather than being treated as zero.
+      const sa = typeof a.size === 'number' ? a.size : null
+      const sb = typeof b.size === 'number' ? b.size : null
+      if (sa === null && sb === null) result = 0
+      else if (sa === null) result = 1
+      else if (sb === null) result = -1
+      else result = sa - sb
+    } else if (key === 'modified') {
+      result = (a.modifiedAt || 0) - (b.modifiedAt || 0)
+    } else {
+      result = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+    }
+
+    if (result !== 0) return result * dir
+    // Ties break by name, ascending, so the order is deterministic.
+    return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+  })
+}
+
+/** The one place a folder's items are filtered and sorted for display. */
+function presentItems(items) {
+  return applySort(applyFilter(items))
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +348,9 @@ function render() {
   renderPreview()
   renderStepControls()
   renderSearchBar()
+  renderSortLabel()
+  renderFilterLabel()
+  renderPatternBar()
 }
 
 function renderNavButtons() {
@@ -275,12 +389,13 @@ function renderStatus() {
     el.statusCount.textContent = ''
     return
   }
-  const shown = applyFilter(column.items)
+  const shown = presentItems(column.items)
   const folders = shown.filter((i) => i.isDirectory).length
   const parts = [pluralize(shown.length, 'item'), pluralize(folders, 'folder')]
-  if (state.filter.trim() && shown.length !== column.items.length) {
-    parts.push(`filtered from ${column.items.length}`)
-  }
+  // Say what is being hidden, and from how many. A filtered folder that just shows a
+  // smaller number is a folder that looks like it lost files.
+  const hidden = column.items.length - shown.length
+  if (hidden > 0) parts.push(`filtered from ${column.items.length}`)
   if (state.selected && !state.selected.isDirectory && typeof state.selected.size === 'number') {
     parts.push(`selected: ${formatSize(state.selected.size)}`)
   }
@@ -578,7 +693,7 @@ function renderColumns() {
     pane.className = 'column'
     pane.dataset.index = String(index)
 
-    const items = applyFilter(column.items)
+    const items = presentItems(column.items)
 
     if (items.length === 0) {
       const empty = document.createElement('p')
@@ -614,11 +729,35 @@ function renderList() {
 
   const header = document.createElement('div')
   header.className = 'list-header'
-  header.innerHTML =
-    '<span class="col-name">Name</span><span class="col-kind">Kind</span><span class="col-size">Size</span><span class="col-date">Date Modified</span>'
+  // Each header sorts by its own column. The active one carries the arrow, so the header
+  // row states the order instead of the user having to open a menu to find out.
+  const cols = [
+    { key: 'name', label: 'Name', cls: 'col-name' },
+    { key: 'kind', label: 'Kind', cls: 'col-kind' },
+    { key: 'size', label: 'Size', cls: 'col-size' },
+    { key: 'modified', label: 'Date Modified', cls: 'col-date' }
+  ]
+  for (const col of cols) {
+    const cell = document.createElement('button')
+    cell.type = 'button'
+    cell.className = `${col.cls} list-sort`
+    const active = state.sort.key === col.key
+    cell.textContent = active ? `${col.label} ${state.sort.ascending ? '↑' : '↓'}` : col.label
+    cell.setAttribute('aria-sort', active ? (state.sort.ascending ? 'ascending' : 'descending') : 'none')
+    cell.title = `Sort by ${col.label}`
+    cell.addEventListener('click', () => {
+      if (state.sort.key === col.key) state.sort.ascending = !state.sort.ascending
+      else {
+        state.sort.key = col.key
+        state.sort.ascending = true
+      }
+      render()
+    })
+    header.append(cell)
+  }
   el.content.append(header)
 
-  const items = applyFilter(column.items)
+  const items = presentItems(column.items)
   if (items.length === 0) {
     const empty = document.createElement('p')
     empty.className = 'hint'
@@ -644,7 +783,7 @@ function renderIcons() {
   const column = activeColumn()
   if (!column) return
 
-  const items = applyFilter(column.items)
+  const items = presentItems(column.items)
   if (items.length === 0) {
     const empty = document.createElement('p')
     empty.className = 'hint'
@@ -1183,7 +1322,7 @@ function moveSelection(delta) {
   const column = state.columns[index]
   if (!column) return
 
-  const items = applyFilter(column.items)
+  const items = presentItems(column.items)
   if (items.length === 0) return
 
   const current = items.findIndex((i) => i.name === state.selected?.name)
@@ -1942,6 +2081,176 @@ function stepPrev() {
 
 function stepNext() {
   return stepMedia(1)
+}
+
+// ---------------------------------------------------------------------------
+// Sort and filter
+// ---------------------------------------------------------------------------
+
+/** Re-sort and re-filter without touching the folder, then redraw. */
+function refreshListing() {
+  render()
+}
+
+const SORT_KEYS = [
+  { key: 'name', label: 'Name' },
+  { key: 'kind', label: 'Kind' },
+  { key: 'size', label: 'Size' },
+  { key: 'modified', label: 'Date Modified' }
+]
+
+/** The entries for the Sort menu, with the active key and direction shown. */
+function sortMenuItems() {
+  const items = SORT_KEYS.map(({ key, label }) => ({
+    label,
+    // A tick on the active key, and an arrow for the direction, so the menu states the
+    // current order rather than making the user infer it.
+    accel: state.sort.key === key ? (state.sort.ascending ? '✓ ↑' : '✓ ↓') : '',
+    run: () => {
+      if (state.sort.key === key) state.sort.ascending = !state.sort.ascending
+      else {
+        state.sort.key = key
+        state.sort.ascending = true
+      }
+      renderSortLabel()
+      refreshListing()
+    }
+  }))
+  return items
+}
+
+/** The entries for the Filter menu: the kinds THIS folder actually contains. */
+function filterMenuItems() {
+  const column = activeColumn()
+  const kinds = column ? availableKinds(column.items) : []
+  const entries = kinds.map(({ kind, count }) => ({
+    label: `${kindLabel(kind)} (${count})`,
+    accel: state.kindFilter.has(kind) ? '✓' : '',
+    run: () => {
+      // Toggling, not replacing: "video and prompt text" is a real question.
+      if (state.kindFilter.has(kind)) state.kindFilter.delete(kind)
+      else state.kindFilter.add(kind)
+      renderFilterLabel()
+      refreshListing()
+    }
+  }))
+
+  if (entries.length > 1) {
+    entries.push({ separator: true })
+    entries.push({
+      label: 'Show All Types',
+      disabled: state.kindFilter.size === 0,
+      run: () => {
+        state.kindFilter.clear()
+        renderFilterLabel()
+        refreshListing()
+      }
+    })
+  }
+  return entries
+}
+
+/** The label on the Sort button: the key, plus the direction when it is not the default. */
+function renderSortLabel() {
+  const entry = SORT_KEYS.find((k) => k.key === state.sort.key)
+  const arrow = state.sort.ascending ? '↑' : '↓'
+  el.sortLabel.textContent = `${entry ? entry.label : 'Name'} ${arrow}`
+  el.sortBtn.classList.toggle('is-on', state.sort.key !== 'name' || !state.sort.ascending)
+}
+
+/** The label on the Filter button: what is being hidden, in words. */
+function renderFilterLabel() {
+  const count = state.kindFilter.size
+  if (count === 0) {
+    el.filterLabel.textContent = 'Filter'
+    el.filterBtn.classList.remove('is-on')
+    return
+  }
+  // Naming one kind is clearer than naming three, and the count covers the rest.
+  const first = [...state.kindFilter][0]
+  el.filterLabel.textContent = count === 1 ? kindLabel(first) : `${kindLabel(first)} +${count - 1}`
+  el.filterBtn.classList.add('is-on')
+}
+
+/** A pattern field for the shot-naming case, shown only while a pattern is active. */
+function renderPatternBar() {
+  el.patternBar.hidden = !isFiltering() && state.pattern.trim() === ''
+  if (!el.patternBar.hidden) el.patternInput.value = state.pattern
+}
+
+for (const [button, build] of [
+  [el.sortBtn, sortMenuItems],
+  [el.filterBtn, filterMenuItems]
+]) {
+  button.addEventListener('click', (event) => {
+    event.stopPropagation()
+    openMenuAt(button, build())
+  })
+}
+
+el.patternInput.addEventListener('input', () => {
+  state.pattern = el.patternInput.value
+  refreshListing()
+})
+
+el.patternClear.addEventListener('click', () => {
+  state.pattern = ''
+  el.patternInput.value = ''
+  refreshListing()
+})
+
+el.filterClear.addEventListener('click', () => {
+  state.kindFilter.clear()
+  renderFilterLabel()
+  refreshListing()
+})
+
+/** Open a menu panel anchored under a toolbar button. */
+function openMenuAt(anchor, items) {
+  closeMenu()
+  const panel = document.createElement('div')
+  panel.className = 'menu-panel menu-dropdown'
+  panel.dataset.menu = 'dropdown'
+  panel.setAttribute('role', 'menu')
+
+  for (const entry of items) {
+    if (entry.separator) {
+      const line = document.createElement('div')
+      line.className = 'menu-separator'
+      panel.append(line)
+      continue
+    }
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'menu-entry'
+    button.setAttribute('role', 'menuitem')
+    const label = document.createElement('span')
+    label.textContent = entry.label
+    button.append(label)
+    if (entry.accel) {
+      const accel = document.createElement('span')
+      accel.className = 'menu-accel'
+      accel.textContent = entry.accel
+      button.append(accel)
+    }
+    if (entry.disabled) {
+      button.disabled = true
+    } else {
+      button.addEventListener('click', async () => {
+        closeMenu()
+        await entry.run()
+      })
+    }
+    panel.append(button)
+  }
+
+  document.body.append(panel)
+  const box = anchor.getBoundingClientRect()
+  placePanel(panel, box.left, box.bottom + 4)
+  openMenu = panel
+  anchor.setAttribute('aria-expanded', 'true')
+  const first = panel.querySelector('.menu-entry:not([disabled])')
+  if (first) first.focus()
 }
 
 // ---------------------------------------------------------------------------

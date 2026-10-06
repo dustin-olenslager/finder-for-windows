@@ -15,8 +15,6 @@
  * "\\server\share\dir", "/home/me") or null. Nothing drive-relative escapes.
  */
 
-const SEPARATOR = /[\\/]/
-
 /** A rooted Windows drive path: "C:\", "C:/", "c:\Users". */
 const DRIVE_ROOTED = /^[A-Za-z]:[\\/]/
 /** A bare drive reference: "C:" or "c:" — drive-relative, never a root. */

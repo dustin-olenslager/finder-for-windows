@@ -41,6 +41,20 @@ def sample_tree():
             ("installer-notes.txt", False, 3_100, "2026-10-04T09:12:00", "text"),
             ("single-take.mp4", False, 8_388_608, "2026-10-04T09:20:00", "video"),
         ],
+        # The case the owner hit: one shot folder holding three versions, each with a
+        # video, a voiceover video and a prompt text file. Nine items, three types, and
+        # no way to see just the takes without filtering. Neutral naming only.
+        "C:\\Users\\dustin\\Videos\\03_Approved": [
+            ("scene-01_AN_V001_VO.mp4", False, 12_582_912, "2026-10-05T17:20:00", "video"),
+            ("scene-01_AN_V001_walkup_PROMPT.txt", False, 12_288, "2026-10-05T17:20:00", "text"),
+            ("scene-01_AN_V001.mp4", False, 12_582_912, "2026-10-05T17:20:00", "video"),
+            ("scene-01_AN_V002_VO.mp4", False, 13_107_200, "2026-10-05T17:38:00", "video"),
+            ("scene-01_AN_V002_walkup_PROMPT.txt", False, 12_288, "2026-10-05T17:38:00", "text"),
+            ("scene-01_AN_V002.mp4", False, 13_107_200, "2026-10-05T17:38:00", "video"),
+            ("scene-01_AN_V003_VO.mp4", False, 11_534_336, "2026-10-05T18:02:00", "video"),
+            ("scene-01_AN_V003_walkup_PROMPT.txt", False, 12_288, "2026-10-05T18:02:00", "text"),
+            ("scene-01_AN_V003.mp4", False, 11_534_336, "2026-10-05T18:02:00", "video"),
+        ],
         "C:\\Users\\dustin\\Projects": [
             ("finder-for-windows", True, None, "2026-10-06T06:30:00", "folder"),
             ("shoot-archive", True, None, "2026-10-05T22:15:00", "folder"),
@@ -55,6 +69,7 @@ def sample_tree():
             ("scene-01-take-02_VO.mp4", False, 15_204_352, "2026-10-05T19:10:00", "video"),
             ("scene-01-take-02.mp4", False, 15_204_352, "2026-10-05T19:02:00", "video"),
             ("notes.txt", False, 512, "2026-10-05T17:00:00", "text"),
+            ("03_Approved", True, None, "2026-10-05T18:02:00", "folder"),
         ],
         "C:\\Users\\dustin\\Projects\\finder-for-windows": [
             ("assets", True, None, "2026-10-05T23:59:00", "folder"),

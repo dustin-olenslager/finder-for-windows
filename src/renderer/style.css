@@ -1057,3 +1057,80 @@ body.has-preview .preview {
   border-radius: 6px;
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--fg-muted); background-clip: content-box; }
+
+/* --- Sort and filter controls ------------------------------------------------ */
+
+.tool-btn-wrap { position: relative; flex: none; }
+
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.tool-btn:hover { background: var(--bg-hover); }
+.tool-btn svg { width: 14px; height: 14px; flex: none; color: var(--fg-muted); }
+/* An active sort or filter must be visible without opening the menu. */
+.tool-btn.is-on {
+  background: var(--accent-soft, rgba(64, 128, 255, 0.14));
+  border-color: var(--accent, #4080ff);
+  color: var(--accent, #4080ff);
+}
+.tool-btn.is-on svg { color: currentColor; }
+
+.menu-dropdown { min-width: 190px; }
+.menu-dropdown .menu-accel { min-width: 30px; text-align: right; }
+
+/* The name-pattern filter bar. */
+.patternbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-soft, rgba(127, 127, 127, 0.06));
+  flex: none;
+}
+
+.patternbar[hidden] { display: none; }
+.patternbar-label { font-size: 12px; color: var(--fg-muted); flex: none; }
+.patternbar-spacer { flex: 1 1 auto; }
+
+.patternbar input {
+  width: 190px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+}
+
+.patternbar input:focus { outline: 2px solid var(--accent, #4080ff); outline-offset: -1px; }
+
+/* Clickable list headers: the header row is the sort control in list view. */
+.list-sort {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: default;
+  padding: 0;
+}
+
+.list-sort:hover { color: var(--fg); text-decoration: underline; }
+.list-sort[aria-sort='ascending'], .list-sort[aria-sort='descending'] { color: var(--fg); }

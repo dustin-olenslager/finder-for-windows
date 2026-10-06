@@ -750,6 +750,143 @@ with sync_playwright() as p:
     pg.keyboard.press("Escape")
     pg.wait_for_timeout(400)
 
+    # --- sort and filter a folder of mixed types ---
+    # The owner's case: one shot folder with three versions, each a video, a voiceover
+    # video and a prompt text file. Nine items, three types.
+    pg.click('.sidebar-item:has-text("Home")')
+    pg.wait_for_timeout(700)
+
+    def listing():
+        return pg.evaluate(
+            """() => {
+                const col = [...document.querySelectorAll('.column')].pop();
+                const rows = [...col.querySelectorAll('.row')].map(r => r.dataset.name);
+                return {
+                    rows,
+                    status: document.getElementById('statusCount').textContent,
+                    sortLabel: document.getElementById('sortLabel').textContent,
+                    filterLabel: document.getElementById('filterLabel').textContent,
+                    patternHidden: document.getElementById('patternBar').hidden
+                };
+            }"""
+        )
+
+    # Reach the folder by typing its path into the search-independent navigation: the
+    # folder is nested, so open Videos then 03_Approved.
+    pg.click('.row[data-name="Videos"]')
+    pg.wait_for_timeout(800)
+    pg.click('.row[data-name="03_Approved"]')
+    pg.wait_for_timeout(900)
+    base = listing()
+    check("the mixed-type folder shows all nine items", len(base["rows"]) == 9, str(base["rows"]))
+    check("the sort control states its order", base["sortLabel"] == "Name ↑", base["sortLabel"])
+
+    # SORT by kind: video, then text — grouped, and folders still first.
+    pg.click("#sortBtn")
+    pg.wait_for_timeout(400)
+    entries = pg.evaluate("() => [...document.querySelectorAll('.menu-dropdown .menu-entry')].map(b => b.textContent)")
+    check("the sort menu offers the four keys", len(entries) == 4, str(entries))
+    pg.evaluate("""() => [...document.querySelectorAll('.menu-dropdown .menu-entry')].find(b => b.textContent.startsWith('Kind')).click()""")
+    pg.wait_for_timeout(700)
+    by_kind = listing()
+    # Media groups before documents (KIND_ORDER), and within each kind the names are
+    # ascending — so the videos are one block and the prompt files are another.
+    check("sorting by kind groups the types together", by_kind["rows"] == [
+        "scene-01_AN_V001_VO.mp4",
+        "scene-01_AN_V001.mp4",
+        "scene-01_AN_V002_VO.mp4",
+        "scene-01_AN_V002.mp4",
+        "scene-01_AN_V003_VO.mp4",
+        "scene-01_AN_V003.mp4",
+        "scene-01_AN_V001_walkup_PROMPT.txt",
+        "scene-01_AN_V002_walkup_PROMPT.txt",
+        "scene-01_AN_V003_walkup_PROMPT.txt",
+    ], str(by_kind["rows"]))
+    check("the sort label updates", by_kind["sortLabel"] == "Kind ↑", by_kind["sortLabel"])
+
+    # SORT by size, descending: the largest take comes first among the videos.
+    pg.click("#sortBtn")
+    pg.wait_for_timeout(400)
+    pg.evaluate("""() => [...document.querySelectorAll('.menu-dropdown .menu-entry')].find(b => b.textContent.startsWith('Size')).click()""")
+    pg.wait_for_timeout(600)
+    pg.click("#sortBtn")
+    pg.wait_for_timeout(400)
+    pg.evaluate("""() => [...document.querySelectorAll('.menu-dropdown .menu-entry')].find(b => b.textContent.startsWith('Size')).click()""")
+    pg.wait_for_timeout(700)
+    by_size = listing()
+    check("clicking the active sort key flips the direction", by_size["sortLabel"] == "Size ↓", by_size["sortLabel"])
+    videos = [r for r in by_size["rows"] if r.endswith(".mp4")]
+    check("the largest video sorts first when descending", videos[0] == "scene-01_AN_V002_VO.mp4", str(videos))
+
+    # FILTER by type: video only. This is the owner's actual ask.
+    pg.click("#filterBtn")
+    pg.wait_for_timeout(400)
+    kinds = pg.evaluate("() => [...document.querySelectorAll('.menu-dropdown .menu-entry')].map(b => b.textContent)")
+    check("the filter menu lists only kinds this folder has", all(k.startswith(("Video", "Text", "Folder")) for k in kinds if not k.startswith("Show")), str(kinds))
+    check("and it counts each kind", any(k == "Video (6)" for k in kinds), str(kinds))
+    pg.evaluate("""() => [...document.querySelectorAll('.menu-dropdown .menu-entry')].find(b => b.textContent.startsWith('Video')).click()""")
+    pg.wait_for_timeout(800)
+    videos_only = listing()
+    check("filtering to video shows only the videos", len(videos_only["rows"]) == 6 and all(r.endswith(".mp4") for r in videos_only["rows"]), str(videos_only["rows"]))
+    check("the status bar admits it is hiding files", "filtered from 9" in videos_only["status"], videos_only["status"])
+    check("the filter button shows the active type", videos_only["filterLabel"] == "Video", videos_only["filterLabel"])
+
+    # The name pattern: narrow to one version, which is the point of the whole feature.
+    check("the pattern field appears once a filter is on", videos_only["patternHidden"] is False, str(videos_only))
+    pg.fill("#patternInput", "V003")
+    pg.wait_for_timeout(800)
+    v3 = listing()
+    check("a name pattern narrows to one version", len(v3["rows"]) == 2, str(v3["rows"]))
+    check("and it keeps only V003 files", all("V003" in r for r in v3["rows"]), str(v3["rows"]))
+
+    # Clearing must restore the full folder, not leave it stuck filtered.
+    pg.click("#patternClear")
+    pg.wait_for_timeout(600)
+    pg.click("#filterClear")
+    pg.wait_for_timeout(700)
+    cleared = listing()
+    check("clearing every filter restores the whole folder", len(cleared["rows"]) == 9, str(cleared["rows"]))
+    check("and the status bar stops claiming a filter", "filtered from" not in cleared["status"], cleared["status"])
+
+    # A type filter must never hide folders: a folder that looks empty is a trap.
+    # Home holds an image and a PDF, so filter by Image — a kind this folder really has.
+    pg.click('.sidebar-item:has-text("Home")')
+    pg.wait_for_timeout(800)
+    pg.click("#filterBtn")
+    pg.wait_for_timeout(400)
+    pg.evaluate("""() => [...document.querySelectorAll('.menu-dropdown .menu-entry')].find(b => b.textContent.startsWith('Image')).click()""")
+    pg.wait_for_timeout(700)
+    home_filtered = listing()
+    check("a type filter never hides folders", "Documents" in home_filtered["rows"], str(home_filtered["rows"]))
+    check("and it hides the files of other types", "readme.txt" not in home_filtered["rows"], str(home_filtered["rows"]))
+
+    # List view headers sort too, and say which column is active.
+    pg.click('.sidebar-item:has-text("Home")')
+    pg.wait_for_timeout(600)
+    pg.click('.seg[data-view="list"]')
+    pg.wait_for_timeout(700)
+    pg.click('.seg[data-view="list"]')
+    pg.wait_for_timeout(800)
+    header = pg.evaluate(
+        """() => [...document.querySelectorAll('.list-sort')].map(b => ({ text: b.textContent, sort: b.getAttribute('aria-sort') }))"""
+    )
+    # The header must name the ACTIVE column and its direction — whichever they are,
+    # carried over from the sort chosen earlier.
+    check(
+        "list headers state which column is sorted",
+        sum(1 for h in header if h["sort"] != "none") == 1 and any(h["sort"] in ("ascending", "descending") for h in header),
+        str(header),
+    )
+    pg.click('.list-sort.col-size')
+    pg.wait_for_timeout(800)
+    after = pg.evaluate("() => [...document.querySelectorAll('.list-sort')].map(b => b.getAttribute('aria-sort'))")
+    check("clicking a list header sorts by that column", after.count("ascending") == 1, str(after))
+    pg.click('.seg[data-view="column"]')
+    pg.wait_for_timeout(600)
+
+    pg.click('.sidebar-item:has-text("Home")')
+    pg.wait_for_timeout(700)
+
     # Recomputed at the very end, after everything above has moved the UI around.
     leaked = hidden_but_visible()
     check("no element marked hidden is actually visible", leaked == [], str(leaked))
