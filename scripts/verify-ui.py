@@ -317,6 +317,100 @@ with sync_playwright() as p:
     check("the index bar reports coverage", indexbar["hidden"] is False and "Index covers" in indexbar["text"], str(indexbar))
     check("the index bar offers to rebuild", indexbar["action"] == "Build Index", indexbar["action"])
 
+    # --- nothing marked hidden may be VISIBLE ---
+    # Asserting `el.hidden === true` passes while the element is still on screen, because
+    # an author rule setting `display: flex` beats the user-agent's `[hidden]` rule. That
+    # is how "Back to Folder" appeared with no search running. Check computed style.
+    def hidden_but_visible():
+        return pg.evaluate(
+            """() => [...document.querySelectorAll('[hidden]')]
+                .filter((node) => getComputedStyle(node).display !== 'none')
+                .map((node) => node.id || node.className || node.tagName)"""
+        )
+
+    # --- file info sits BELOW the preview ---
+    pg.click('.column[data-index="0"] .row[data-name="budget-2026.xlsx"]')
+    pg.wait_for_timeout(700)
+    info = pg.evaluate(
+        """() => {
+            const body = document.getElementById('previewBody');
+            const stage = body.querySelector('.preview-stage');
+            const block = body.querySelector('.info-block');
+            const labels = block ? [...block.querySelectorAll('dt')].map(n => n.textContent) : [];
+            const values = block ? [...block.querySelectorAll('dd')].map(n => n.textContent) : [];
+            return {
+                hasStage: !!stage,
+                hasBlock: !!block,
+                blockIsAfterStage: !!(stage && block && stage.compareDocumentPosition(block) & Node.DOCUMENT_POSITION_FOLLOWING),
+                labels, values
+            };
+        }"""
+    )
+    check("the preview has a stage element", info["hasStage"])
+    check("file info appears below the preview", info["hasBlock"] and info["blockIsAfterStage"], str(info))
+    check("file info names the kind and the size", "Kind" in info["labels"] and "Size" in info["labels"], str(info["labels"]))
+    check("file info gives the folder", "Where" in info["labels"], str(info["labels"]))
+    check("file info gives the dates", "Created" in info["labels"] and "Modified" in info["labels"], str(info["labels"]))
+    check("file info omits rows it cannot fill", all(v.strip() for v in info["values"]), str(info["values"]))
+
+    # --- an image reports its own pixel dimensions ---
+    pg.click('.column[data-index="0"] .row[data-name="budget-2026.xlsx"]')
+    pg.wait_for_timeout(200)
+    pg.evaluate(
+        """async () => {
+            const body = document.getElementById('previewBody');
+            body.replaceChildren();
+            const stage = document.createElement('div');
+            stage.className = 'preview-stage';
+            const img = document.createElement('img');
+            img.className = 'preview-image';
+            img.src = 'data:image/gif;base64,R0lGODlhCgAKAIAAAP///wAAACwAAAAACgAKAAACCkQghqnc/l8AaAEAOw==';
+            stage.append(img);
+            body.append(stage);
+        }"""
+    )
+    pg.wait_for_timeout(500)
+    dims = pg.evaluate("() => { const i = document.querySelector('.preview-image'); return i ? { w: i.naturalWidth, h: i.naturalHeight } : null }")
+    check("an image decodes so its dimensions are knowable", dims and dims["w"] == 10 and dims["h"] == 10, str(dims))
+
+    # --- the interface can be made bigger, visibly ---
+    zoom = pg.evaluate(
+        """() => ({
+            value: document.getElementById('zoomValue').textContent,
+            rootFont: getComputedStyle(document.documentElement).fontSize
+        })"""
+    )
+    check("the toolbar shows the current interface size", zoom["value"] == "100%", str(zoom))
+
+    pg.click("#zoomIn")
+    pg.wait_for_timeout(300)
+    bigger = pg.evaluate(
+        """() => ({
+            value: document.getElementById('zoomValue').textContent,
+            rootFont: getComputedStyle(document.documentElement).fontSize
+        })"""
+    )
+    check("one click makes the interface bigger", bigger["value"] == "110%" and bigger["rootFont"] != zoom["rootFont"], str(bigger))
+
+    pg.click("#zoomOut")
+    pg.click("#zoomOut")
+    pg.wait_for_timeout(300)
+    smaller = pg.evaluate("() => document.getElementById('zoomValue').textContent")
+    check("and smaller again", smaller == "90%", smaller)
+
+    pg.keyboard.press("Control+0")
+    pg.wait_for_timeout(300)
+    reset = pg.evaluate("() => document.getElementById('zoomValue').textContent")
+    check("Ctrl+0 returns to actual size", reset == "100%", reset)
+
+    # Recomputed at the very end, after everything above has moved the UI around.
+    leaked = hidden_but_visible()
+    check("no element marked hidden is actually visible", leaked == [], str(leaked))
+    check(
+        "the search bar is not visible before a search",
+        pg.evaluate("() => getComputedStyle(document.getElementById('searchbar')).display === 'none'"),
+    )
+
     check("no page errors anywhere", not errs, str(errs[:2]))
     b.close()
 

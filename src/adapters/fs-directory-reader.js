@@ -57,6 +57,7 @@ async function toFileItem(entry, dirPath) {
       isDirectory: entry.isDirectory(),
       size: null,
       modifiedAt: null,
+      createdAt: null,
       kind: entry.isDirectory() ? 'folder' : kindOf(entry.name),
       isHidden: isHidden(0, entry.name),
       isCloudPlaceholder: false,
@@ -73,6 +74,9 @@ async function toFileItem(entry, dirPath) {
     // `modifiedAt` (milliseconds) is the name the renderer reads; keep the field name
     // identical on every path out of this adapter so a column can never go blank.
     modifiedAt: stat.mtimeMs,
+    // NTFS keeps a real creation time, so this is worth showing. It can be later than
+    // the modified time after a copy, which is the filesystem's answer, not a bug.
+    createdAt: stat.birthtimeMs || null,
     kind: isDirectory ? 'folder' : kindOf(entry.name),
     isHidden: isHidden(attributes, entry.name),
     isCloudPlaceholder: isCloudPlaceholder(attributes),

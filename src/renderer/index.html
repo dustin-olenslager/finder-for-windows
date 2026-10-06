@@ -68,6 +68,18 @@
       <button id="previewToggle" class="icon-btn is-on" title="Show preview" aria-label="Show preview" aria-pressed="true">
         <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.6" y="3" width="12.8" height="10" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M9.8 3v10" stroke="currentColor" stroke-width="1.4"/></svg>
       </button>
+
+      <!-- Interface size. A visible control, not only a shortcut: the owner asked
+           whether this was easy to do, and the answer must be yes without knowing a key. -->
+      <div class="zoom">
+        <button type="button" class="icon-btn" id="zoomOut" title="Smaller (Ctrl+-)" aria-label="Smaller">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 8h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </button>
+        <span class="zoom-value" id="zoomValue">100%</span>
+        <button type="button" class="icon-btn" id="zoomIn" title="Larger (Ctrl+=)" aria-label="Larger">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 4v8M4 8h8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </button>
+      </div>
     </div>
   </header>
 

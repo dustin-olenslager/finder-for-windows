@@ -9,6 +9,7 @@ Usage:
     python3 scripts/build-preview.py <out.html>
 """
 
+import datetime
 import json
 import pathlib
 import re
@@ -61,6 +62,14 @@ def to_items(rows):
             "isDirectory": is_dir,
             "size": size,
             "modifiedAt": modified,
+            # The real reader emits createdAt (NTFS birthtime). The harness must model
+            # the same shape, or a UI feature that depends on it cannot be verified.
+            # Fixtures give ISO strings, so derive in the same units the app formats.
+            "createdAt": (
+                datetime.datetime.fromisoformat(modified).timestamp() * 1000 - 86400000
+                if modified
+                else None
+            ),
             "kind": kind,
             "isCloudPlaceholder": False,
             "metadataUnavailable": False,

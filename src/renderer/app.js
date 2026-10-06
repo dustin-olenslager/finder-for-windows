@@ -39,6 +39,9 @@ const el = {
   indexText: document.getElementById('indexText'),
   indexAction: document.getElementById('indexAction'),
   indexDismiss: document.getElementById('indexDismiss'),
+  zoomIn: document.getElementById('zoomIn'),
+  zoomOut: document.getElementById('zoomOut'),
+  zoomValue: document.getElementById('zoomValue'),
   quicklook: document.getElementById('quicklook'),
   quicklookBody: document.getElementById('quicklookBody'),
   quicklookName: document.getElementById('quicklookName'),
@@ -70,7 +73,10 @@ const state = {
   searchBusy: false,
 
   // Index coverage, as reported by the last scan.
-  index: { known: false, running: false, files: 0, folders: 0, elapsedMs: 0, finishedAt: null, current: null }
+  index: { known: false, running: false, files: 0, folders: 0, elapsedMs: 0, finishedAt: null, current: null },
+
+  // Interface size. Held as an index into ZOOM_STEPS so the ladder is the only truth.
+  zoomIndex: 3
 }
 
 let backStack = []
@@ -691,11 +697,77 @@ async function renderPreview() {
   const preview = await window.finder.getPreview(path, item.name)
   if (token !== previewToken) return // the selection moved on while we were reading
 
-  fillPane(el.previewBody, preview, path, item.name)
+  fillPane(el.previewBody, preview, path, item.name, item)
 }
 
-/** Render one preview payload into a body element. */
-function fillPane(body, preview, path, name) {
+/**
+ * The details block under the preview: what the file is, how big, and when.
+ *
+ * A preview with no facts around it answers "what is it" but not "which one is it" —
+ * the question people actually have when two files look alike. Values the app does not
+ * know are omitted rather than shown as a dash: an empty row teaches nothing.
+ *
+ * @param {object} item the selected item (size/kind/dates), when the caller has it
+ */
+function buildInfoBlock(item = {}, preview = {}) {
+  const rows = []
+
+  const add = (label, value) => {
+    if (value === null || value === undefined || value === '') return
+    rows.push([label, String(value)])
+  }
+
+  // Pixel dimensions come from the rendered image itself (see measureImage), so they
+  // are appended by the caller once the element has loaded.
+  add('Kind', formatKind(item))
+  if (typeof item.size === 'number') add('Size', formatSize(item.size))
+  if (item.size === null) add('Size', 'Unknown')
+  add('Where', item.path ? item.path.slice(0, item.path.lastIndexOf('\\')) : null)
+  add('Created', formatDate(item.createdAt))
+  add('Modified', formatDate(item.modifiedAt))
+  if (preview.truncated) add('Shown', 'First part of the file only')
+
+  if (rows.length === 0) return null
+
+  const block = document.createElement('dl')
+  block.className = 'info-block'
+  for (const [label, value] of rows) {
+    const dt = document.createElement('dt')
+    dt.textContent = label
+    const dd = document.createElement('dd')
+    dd.textContent = value
+    dd.title = value
+    block.append(dt, dd)
+  }
+  return block
+}
+
+/** Read an image's natural size once it has decoded, and fill in the Dimensions row. */
+function measureImage(img, block) {
+  const apply = () => {
+    if (!block || !img.naturalWidth) return
+    const dt = document.createElement('dt')
+    dt.textContent = 'Dimensions'
+    const dd = document.createElement('dd')
+    dd.textContent = `${img.naturalWidth} × ${img.naturalHeight}`
+    // Dimensions read best right under Size, but the image is not decoded at build
+    // time, so the row is inserted here once it is known.
+    const anchor = [...block.querySelectorAll('dt')].find((node) => node.textContent === 'Kind')
+    if (anchor) anchor.after(dt, dd)
+    else block.prepend(dd), block.prepend(dt)
+  }
+  if (img.complete && img.naturalWidth) apply()
+  else img.addEventListener('load', apply, { once: true })
+}
+
+/**
+ * Render one preview payload into a body element.
+ *
+ * The preview itself goes into a `.preview-stage` and the facts go into an
+ * `.info-block` BELOW it — the owner asked for exactly this, and it is the right order:
+ * you look at the thing first, then read what it is.
+ */
+function fillPane(body, preview, path, name, item = {}) {
   body.replaceChildren()
 
   if (!preview.ok) {
@@ -704,6 +776,14 @@ function fillPane(body, preview, path, name) {
   }
 
   const fileUrl = `file:///${path.replace(/\\/g, '/').replace(/^\/+/, '')}`
+  const stage = document.createElement('div')
+  stage.className = 'preview-stage'
+  body.append(stage)
+
+  const info = buildInfoBlock(item, preview)
+  const finish = () => {
+    if (info) body.append(info)
+  }
 
   switch (preview.mode) {
     case 'image': {
@@ -712,9 +792,11 @@ function fillPane(body, preview, path, name) {
       image.alt = name
       image.className = 'preview-image'
       image.addEventListener('error', () => {
-        body.replaceChildren(note('This image could not be displayed.'))
+        stage.replaceChildren(note('This image could not be displayed.'))
       })
-      body.append(image)
+      if (info) measureImage(image, info)
+      stage.append(image)
+      finish()
       return
     }
     case 'video': {
@@ -722,7 +804,22 @@ function fillPane(body, preview, path, name) {
       video.src = fileUrl
       video.controls = true
       video.className = 'preview-video'
-      body.append(video)
+      // Video knows its own pixel size too, once the metadata arrives.
+      video.addEventListener(
+        'loadedmetadata',
+        () => {
+          if (!info || !video.videoWidth) return
+          const dt = document.createElement('dt')
+          dt.textContent = 'Dimensions'
+          const dd = document.createElement('dd')
+          dd.textContent = `${video.videoWidth} × ${video.videoHeight}`
+          const anchor = [...info.querySelectorAll('dt')].find((node) => node.textContent === 'Kind')
+          if (anchor) anchor.after(dt, dd)
+        },
+        { once: true }
+      )
+      stage.append(video)
+      finish()
       return
     }
     case 'audio': {
@@ -730,7 +827,8 @@ function fillPane(body, preview, path, name) {
       audio.src = fileUrl
       audio.controls = true
       audio.className = 'preview-audio'
-      body.append(audio)
+      stage.append(audio)
+      finish()
       return
     }
     case 'pdf': {
@@ -738,19 +836,22 @@ function fillPane(body, preview, path, name) {
       frame.src = fileUrl
       frame.className = 'preview-pdf'
       frame.title = name
-      body.append(frame)
+      stage.append(frame)
+      finish()
       return
     }
     case 'text': {
       const pre = document.createElement('pre')
       pre.className = 'preview-text'
       pre.textContent = preview.text
-      body.append(pre)
-      if (preview.truncated) body.append(note('Showing the beginning of this file.'))
+      stage.append(pre)
+      if (preview.truncated) stage.append(note('Showing the beginning of this file.'))
+      finish()
       return
     }
     default:
-      body.append(note(preview.note || 'No preview for this file type.'))
+      stage.append(note(preview.note || 'No preview for this file type.'))
+      finish()
   }
 }
 
@@ -1208,6 +1309,10 @@ const MENUS = {
       { label: 'Show Preview', accel: 'Ctrl+I', run: () => setPreviewOpen(!state.previewOpen) },
       { label: 'Quick Look', accel: 'Space', run: openQuickLook },
       { separator: true },
+      { label: 'Larger', accel: 'Ctrl+=', run: () => zoomBy(1) },
+      { label: 'Smaller', accel: 'Ctrl+-', run: () => zoomBy(-1) },
+      { label: 'Actual Size', accel: 'Ctrl+0', run: zoomReset },
+      { separator: true },
       { label: 'Search', accel: 'Ctrl+F', run: () => { el.search.focus(); el.search.select() } },
       { label: 'Back to Folder', accel: 'Esc', run: exitSearch },
       { separator: true },
@@ -1351,6 +1456,8 @@ function showShortcuts() {
     ['Esc', 'Back to the folder'],
     ['Ctrl+I', 'Show or hide the preview'],
     ['Ctrl+1 / 2 / 3', 'Columns / List / Icons'],
+    ['Ctrl+= / Ctrl+-', 'Larger / smaller interface'],
+    ['Ctrl+0', 'Actual size (100%)'],
     ['Backspace', 'Back'],
     ['Alt+← / →', 'Back / Forward'],
     ['Alt+↑', 'Enclosing folder']
@@ -1410,6 +1517,70 @@ for (const button of document.querySelectorAll('.menubar-item')) {
 document.addEventListener('click', (event) => {
   if (openMenu && !openMenu.contains(event.target)) closeMenu()
 })
+
+// ---------------------------------------------------------------------------
+// Interface size
+// ---------------------------------------------------------------------------
+
+/**
+ * The interface scale, in steps.
+ *
+ * A step ladder rather than a free percentage: every step has been looked at, and a
+ * slider invites settings nobody has checked. Ctrl+0 returns to 100%, which is the
+ * escape hatch that makes experimenting safe.
+ */
+const ZOOM_STEPS = [0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]
+
+/**
+ * The index of 1.0, found rather than written down.
+ *
+ * Hardcoding this was wrong once already: the constant said 3 while 1.0 sits at index 2,
+ * so "Actual Size" quietly jumped the interface to 110%.
+ */
+const ZOOM_DEFAULT_INDEX = Math.max(0, ZOOM_STEPS.indexOf(1))
+
+/** A stored preference, or null when there is none. Never 0-by-accident. */
+function readStoredZoom() {
+  try {
+    const raw = localStorage.getItem('zoomIndex')
+    // `Number(null)` is 0, not NaN — treating "nothing stored" as index 0 would start
+    // the app at 80% for everyone who has never touched the control.
+    if (raw === null) return null
+    const value = Number(raw)
+    if (!Number.isInteger(value) || value < 0 || value >= ZOOM_STEPS.length) return null
+    return value
+  } catch {
+    return null
+  }
+}
+
+function applyZoom(index) {
+  const clamped = Math.max(0, Math.min(ZOOM_STEPS.length - 1, index))
+  const scale = ZOOM_STEPS[clamped]
+  state.zoomIndex = clamped
+
+  // A root font size, not a CSS transform: everything sized in rem scales together and
+  // the layout reflows honestly instead of being magnified into clipped edges.
+  document.documentElement.style.fontSize = `${16 * scale}px`
+  document.body.dataset.zoom = String(scale)
+  el.zoomValue.textContent = `${Math.round(scale * 100)}%`
+  el.zoomOut.disabled = clamped === 0
+  el.zoomIn.disabled = clamped === ZOOM_STEPS.length - 1
+
+  try {
+    localStorage.setItem('zoomIndex', String(clamped))
+  } catch {
+    /* a private or read-only profile must not break the app */
+  }
+}
+
+function zoomBy(delta) {
+  applyZoom(state.zoomIndex + delta)
+}
+
+function zoomReset() {
+  applyZoom(ZOOM_DEFAULT_INDEX)
+}
 
 // ---------------------------------------------------------------------------
 // Events
@@ -1515,6 +1686,9 @@ el.indexDismiss.addEventListener('click', () => {
   renderIndexBar()
 })
 
+el.zoomIn.addEventListener('click', () => zoomBy(1))
+el.zoomOut.addEventListener('click', () => zoomBy(-1))
+
 // Scan progress: the numbers move while it runs, so the wait is legible.
 window.finder?.onIndexProgress?.((progress) => {
   state.index = { ...state.index, ...progress, running: !progress.done && !progress.cancelled, known: true }
@@ -1609,6 +1783,15 @@ document.addEventListener('keydown', async (event) => {
   } else if (modifier && (event.key === '1' || event.key === '2' || event.key === '3')) {
     event.preventDefault()
     setView({ 1: 'column', 2: 'list', 3: 'icon' }[event.key])
+  } else if (modifier && (event.key === '=' || event.key === '+')) {
+    event.preventDefault()
+    zoomBy(1)
+  } else if (modifier && event.key === '-') {
+    event.preventDefault()
+    zoomBy(-1)
+  } else if (modifier && event.key === '0') {
+    event.preventDefault()
+    zoomReset()
   } else if (modifier && event.key === 'f') {
     event.preventDefault()
     el.search.focus()
@@ -1626,6 +1809,10 @@ document.addEventListener('keydown', async (event) => {
     return
   }
   const start = await window.finder.startFolder()
+
+  // Restore the interface size before anything is painted, so the window never visibly
+  // resizes itself a moment after it appears.
+  applyZoom(readStoredZoom() ?? ZOOM_DEFAULT_INDEX)
   await renderSidebar()
   state.activeSidebar = start
   state.columns = [await readColumn(start)]

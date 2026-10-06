@@ -176,6 +176,28 @@ body {
 .icon-btn.is-on { background: var(--bg-selected); color: #fff; }
 .icon-btn.is-on:hover:not(:disabled) { background: var(--bg-selected); filter: brightness(1.1); }
 
+/* Interface size. A stepper with a visible percentage, so the current size is never a
+   guess and one click always returns toward 100%. */
+.zoom {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px;
+  border-radius: 7px;
+  background: var(--bg-hover);
+}
+
+.zoom-value {
+  min-width: 42px;
+  text-align: center;
+  font-size: 11.5px;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.zoom .icon-btn { width: 22px; height: 22px; border-radius: 5px; }
+
 /* The preview pane's own close button stays neutral even when the pane is open. */
 .preview .icon-btn.is-on { background: transparent; color: var(--fg); }
 
@@ -397,6 +419,12 @@ body {
 .searchbar-spacer { flex: 1; }
 .searchbar-label { color: var(--fg); }
 
+/* `hidden` must win. An author rule setting `display: flex` beats the user-agent's
+   `[hidden] { display: none }`, so the bar would show even when the markup says it is
+   hidden — which is exactly how "Back to Folder" appeared with no search running. */
+.searchbar[hidden],
+.indexbar[hidden] { display: none; }
+
 /* --------------------------------------------------------------- index bar */
 
 .indexbar {
@@ -438,6 +466,40 @@ body {
 .row-result .col-name { display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
 .row-where { font-size: 11px; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-result.is-selected .row-where { color: rgba(255, 255, 255, 0.85); }
+
+/* ------------------------------------------------------------- info block */
+
+/* The facts sit BELOW the preview: you look at the thing, then read what it is. */
+.preview-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+}
+
+.info-block {
+  flex: none;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 12px;
+  margin: 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+}
+
+.info-block dt { color: var(--fg-muted); white-space: nowrap; }
+
+.info-block dd {
+  margin: 0;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 
 /* -------------------------------------------------------------------- body */
 
@@ -722,11 +784,14 @@ body.has-preview .preview {
   overflow: auto;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: flex-start;
   padding: 10px;
   gap: 8px;
 }
+
+/* The stage centers the preview; the info block below it stays full width. */
+.preview-body .preview-stage { padding: 0; }
 
 .preview-image,
 .preview-video {
