@@ -35,11 +35,26 @@ def sample_tree():
             ("readme.txt", False, 611, "2026-09-30T20:45:00", "text"),
             ("shot-list.pdf", False, 2_884_019, "2026-10-03T13:37:00", "pdf"),
         ],
+        # A folder holding exactly ONE media asset: the arrows must not appear at all,
+        # because there is nothing to step to.
+        "C:\\Users\\dustin\\Downloads": [
+            ("installer-notes.txt", False, 3_100, "2026-10-04T09:12:00", "text"),
+            ("single-take.mp4", False, 8_388_608, "2026-10-04T09:20:00", "video"),
+        ],
         "C:\\Users\\dustin\\Projects": [
             ("finder-for-windows", True, None, "2026-10-06T06:30:00", "folder"),
             ("shoot-archive", True, None, "2026-10-05T22:15:00", "folder"),
             ("archive", True, None, "2026-08-14T10:00:00", "folder"),
             ("cleanup.ps1", False, 1_204, "2026-09-22T19:03:00", "code"),
+        ],
+        # Four takes of one shot, the way a real folder of versions looks — this is the
+        # case the owner hit and asked to be able to flip through.
+        "C:\\Users\\dustin\\Videos": [
+            ("scene-01-take-01_VO.mp4", False, 14_680_064, "2026-10-05T18:55:00", "video"),
+            ("scene-01-take-01.mp4", False, 14_680_064, "2026-10-05T18:40:00", "video"),
+            ("scene-01-take-02_VO.mp4", False, 15_204_352, "2026-10-05T19:10:00", "video"),
+            ("scene-01-take-02.mp4", False, 15_204_352, "2026-10-05T19:02:00", "video"),
+            ("notes.txt", False, 512, "2026-10-05T17:00:00", "text"),
         ],
         "C:\\Users\\dustin\\Projects\\finder-for-windows": [
             ("assets", True, None, "2026-10-05T23:59:00", "folder"),

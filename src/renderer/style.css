@@ -198,6 +198,36 @@ body {
 
 .zoom .icon-btn { width: 22px; height: 22px; border-radius: 5px; }
 
+/* The stepper reads as one control: ‹ 1 of 4 › — the counter belongs BETWEEN the arrows,
+   not stranded beside the filename. */
+.preview-steps {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--bg-soft, rgba(127, 127, 127, 0.08));
+}
+
+.preview-steps[hidden] { display: none; }
+
+.step-btn { width: 26px; height: 24px; }
+
+.media-count {
+  flex: none;
+  font-size: 11px;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding: 0 2px;
+  min-width: 42px;
+  text-align: center;
+}
+
+/* A gap before Close: stepping forward must never land on "hide the pane". */
+.close-btn { margin-left: 6px; flex: none; }
+
 /* The preview pane's own close button stays neutral even when the pane is open. */
 .preview .icon-btn.is-on { background: transparent; color: var(--fg); }
 
@@ -790,7 +820,7 @@ body.has-preview .preview {
 .preview-head,
 .quicklook-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
   padding: 10px 12px;
@@ -798,7 +828,9 @@ body.has-preview .preview {
   flex: none;
 }
 
-.preview-titles { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+/* The titles take the free space so the filename is not truncated while the header is
+   empty on the right — that was visible in review. */
+.preview-titles { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
 
 .preview-name {
   font-weight: 600;

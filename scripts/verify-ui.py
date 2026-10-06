@@ -519,7 +519,13 @@ with sync_playwright() as p:
                 disabled: [...panel.querySelectorAll('.menu-entry[disabled]')].map(b => b.textContent),
                 insideViewport: box.left >= 0 && box.top >= 0 &&
                     box.right <= window.innerWidth && box.bottom <= window.innerHeight,
-                selected: document.querySelector('.row.is-selected')?.dataset.name || null,
+                // The LAST column is the folder being previewed; reading the first
+                // column would pick up whatever is selected in the parent folder.
+                selected: (() => {
+                    const cols = [...document.querySelectorAll('.column')];
+                    const last = cols[cols.length - 1];
+                    return last?.querySelector('.row.is-selected')?.dataset.name || null;
+                })(),
                 hasFocus: !!document.activeElement?.closest('.menu-context')
             };
         }"""
@@ -570,6 +576,113 @@ with sync_playwright() as p:
     pg.wait_for_timeout(400)
     ran = pg.evaluate("() => window.__copied || ''")
     check("a context-menu command really runs", ran.endswith("logo.png"), ran)
+
+    def click_row(name):
+        """Click a file row by name, wherever it sits — the folder may open in any column."""
+        pg.click(f'.row[data-name="{name}"]')
+        pg.wait_for_timeout(700)
+
+    # --- stepping through multiple media assets in a folder ---
+    # This is the case the owner hit: four takes of one shot, and no way to flip between
+    # them. Open the Videos folder and select the first video.
+    # Navigate home first, then into Videos from the listing: Videos is not a sidebar
+    # entry, and the search bar may or may not still be open at this point.
+    pg.click('.sidebar-item:has-text("Home")')
+    pg.wait_for_timeout(700)
+    pg.click('.column[data-index="0"] .row[data-name="Videos"]')
+    pg.wait_for_timeout(900)
+
+    def media():
+        return pg.evaluate(
+            """() => ({
+                // The LAST column is the folder being previewed; reading the first
+                // column would pick up whatever is selected in the parent folder.
+                selected: (() => {
+                    const cols = [...document.querySelectorAll('.column')];
+                    const last = cols[cols.length - 1];
+                    return last?.querySelector('.row.is-selected')?.dataset.name || null;
+                })(),
+                previewName: document.getElementById('previewName').textContent,
+                count: document.getElementById('mediaCount').textContent,
+                countHidden: document.getElementById('previewSteps').hidden,
+                // The stepper is one group; hidden on the group hides both arrows.
+                prevHidden: document.getElementById('previewSteps').hidden,
+                nextHidden: document.getElementById('previewSteps').hidden,
+                prevDisabled: document.getElementById('previewPrev').disabled,
+                nextDisabled: document.getElementById('previewNext').disabled
+            })"""
+        )
+
+    click_row("scene-01-take-01_VO.mp4")
+    first = media()
+    check("step arrows appear when a folder holds several media assets", first["prevHidden"] is False and first["nextHidden"] is False, str(first))
+    check("the position in the folder is stated", first["count"] == "1 of 4", first["count"])
+    check("the first item cannot step backwards", first["prevDisabled"] is True, str(first))
+    check("the first item can step forwards", first["nextDisabled"] is False, str(first))
+
+    # The arrow button advances the preview to the next take.
+    pg.click("#previewNext")
+    pg.wait_for_timeout(800)
+    second = media()
+    check("the next arrow moves to the next media asset", second["selected"] == "scene-01-take-01.mp4", str(second))
+    check("and the preview follows it", second["previewName"] == "scene-01-take-01.mp4", second["previewName"])
+    check("the position updates", second["count"] == "2 of 4", second["count"])
+    check("now it can step backwards too", second["prevDisabled"] is False, str(second))
+
+    # The keyboard does the same thing.
+    pg.keyboard.press("ArrowRight")
+    pg.wait_for_timeout(800)
+    third = media()
+    check("the right arrow steps forward", third["selected"] == "scene-01-take-02_VO.mp4", str(third))
+    pg.keyboard.press("ArrowLeft")
+    pg.wait_for_timeout(800)
+    back = media()
+    check("the left arrow steps back", back["selected"] == "scene-01-take-01.mp4", str(back))
+
+    # The last item must disable forward and say so rather than silently doing nothing.
+    click_row("scene-01-take-02.mp4")
+    last = media()
+    check("the last item cannot step forwards", last["nextDisabled"] is True, str(last))
+    check("and the count says where it is", last["count"] == "4 of 4", last["count"])
+    pg.keyboard.press("ArrowRight")
+    pg.wait_for_timeout(600)
+    check("stepping past the end explains itself", pg.evaluate("() => !!document.querySelector('.toast')") is True)
+
+    # A non-media file must not offer stepping at all — an arrow that does nothing is
+    # worse than no arrow.
+    click_row("notes.txt")
+    text = media()
+    check("a non-media file shows no step arrows", text["prevHidden"] is True and text["nextHidden"] is True, str(text))
+
+    # Stepping must skip non-media files, so it goes 1 -> 2 -> 3 -> 4 of the videos only.
+    click_row("scene-01-take-01_VO.mp4")
+    order = []
+    for _ in range(3):
+        pg.click("#previewNext")
+        pg.wait_for_timeout(700)
+        order.append(
+            pg.evaluate(
+                """() => {
+                    const cols = [...document.querySelectorAll('.column')];
+                    return cols[cols.length - 1]?.querySelector('.row.is-selected')?.dataset.name || null;
+                }"""
+            )
+        )
+    check(
+        "stepping visits only the media, in order",
+        order == ["scene-01-take-01.mp4", "scene-01-take-02_VO.mp4", "scene-01-take-02.mp4"],
+        str(order),
+    )
+
+    # A folder with a single media file gets no arrows: there is nothing to step to.
+    # Downloads holds one video and one text file: a single media asset, so no arrows.
+    click_row("Downloads")
+    click_row("single-take.mp4")
+    single = media()
+    check("a lone media file gets no step arrows", single["prevHidden"] is True and single["nextHidden"] is True, str(single))
+
+    pg.click('.sidebar-item:has-text("Home")')
+    pg.wait_for_timeout(700)
 
     # Recomputed at the very end, after everything above has moved the UI around.
     leaked = hidden_but_visible()

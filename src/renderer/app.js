@@ -29,6 +29,10 @@ const el = {
   previewMeta: document.getElementById('previewMeta'),
   previewToggle: document.getElementById('previewToggle'),
   previewClose: document.getElementById('previewClose'),
+  previewPrev: document.getElementById('previewPrev'),
+  previewNext: document.getElementById('previewNext'),
+  previewSteps: document.getElementById('previewSteps'),
+  mediaCount: document.getElementById('mediaCount'),
   searchClear: document.getElementById('searchClear'),
   scope: document.getElementById('scope'),
   scopeWrap: document.getElementById('scopeWrap'),
@@ -209,6 +213,7 @@ function render() {
   renderNavButtons()
   renderBreadcrumb()
   renderPreview()
+  renderStepControls()
   renderSearchBar()
 }
 
@@ -691,6 +696,7 @@ async function renderPreview() {
   if (!state.previewOpen || !state.selected || state.selected.isDirectory) {
     el.previewBody.replaceChildren()
     el.previewName.textContent = ''
+    el.previewName.title = ''
     el.previewMeta.textContent = ''
     return
   }
@@ -700,6 +706,9 @@ async function renderPreview() {
   const token = ++previewToken
 
   el.previewName.textContent = item.name
+  // The preview pane is narrow and a shot name like scene-01-take-01_VO.mp4 does
+  // not fit, so the full name stays reachable on hover.
+  el.previewName.title = item.name
   el.previewMeta.textContent = `${formatKind(item)}${
     typeof item.size === 'number' ? ` · ${formatSize(item.size)}` : ''
   }`
@@ -1530,8 +1539,9 @@ function setView(view) {
 
 function showShortcuts() {
   const rows = [
-    ['Arrows', 'Move the selection'],
     ['Space', 'Quick Look'],
+    ['← / →', 'Previous / next item (media) or move the selection'],
+    ['↑ / ↓', 'Move the selection'],
     ['Enter', 'Open'],
     ['F2', 'Rename'],
     ['Ctrl+Shift+N', 'New Folder'],
@@ -1728,6 +1738,135 @@ function openContextMenu(event, kind) {
   // Focus the first live entry so the keyboard works immediately, as a native menu does.
   const first = panel.querySelector('.menu-entry:not([disabled])')
   if (first) first.focus()
+}
+
+/** Kinds the preview can step through. A folder of four video takes is the whole point. */
+const STEP_KINDS = new Set(['image', 'video', 'audio', 'pdf'])
+
+/**
+ * Step to the next or previous previewable asset in the folder.
+ *
+ * Two scopes, because both are wanted at different moments:
+ *   - 'folder' (the default, and what the arrows do): flip through the takes in THIS
+ *     folder, the way you review four versions of the same shot.
+ *   - 'all': keep going across folder boundaries, which is what you want when walking a
+ *     whole directory tree of assets.
+ *
+ * Selection is by NAME, not index, so the caller re-reads the folder and the state
+ * stays honest if the directory changed underneath.
+ *
+ * @param {number} delta +1 forward, -1 back
+ * @param {{ scope?: 'folder'|'all' }} [options]
+ */
+async function stepMedia(delta, { scope = 'folder' } = {}) {
+  const column = activeColumn()
+  if (!column) return { ok: false, error: 'No folder is open.' }
+
+  const current = state.selected
+  const pool = column.items.filter((item) => !item.isDirectory && STEP_KINDS.has(item.kind))
+  if (pool.length === 0) {
+    showToast('No images, video or audio to step through here.')
+    return { ok: false, error: 'nothing to step through' }
+  }
+
+  const index = current ? pool.findIndex((item) => item.name === current.name) : -1
+  let next = null
+
+  if (index === -1) {
+    // Nothing selected, or the selection is not previewable: start at the nearest end.
+    next = delta > 0 ? pool[0] : pool[pool.length - 1]
+  } else {
+    const target = index + delta
+    if (target >= 0 && target < pool.length) {
+      next = pool[target]
+    } else if (scope === 'all') {
+      return stepAcrossFolders(delta)
+    } else {
+      // Say so rather than silently doing nothing: the end of the folder is information.
+      showToast(delta > 0 ? 'That is the last item here.' : 'That is the first item here.')
+      return { ok: false, error: 'at the end' }
+    }
+  }
+
+  const pane = column.path === activePath() ? state.columns.length - 1 : state.columns.indexOf(column)
+  await selectInColumn(pane === -1 ? state.columns.length - 1 : pane, next.name)
+  return { ok: true, name: next.name }
+}
+
+/** Walk to the neighbouring folder that has a previewable asset in the given direction. */
+async function stepAcrossFolders(delta) {
+  const column = activeColumn()
+  const parent = await window.finder.parentPath(column.path)
+  if (!parent) return { ok: false, error: 'no parent folder' }
+
+  const siblings = await window.finder.listDirectory(parent)
+  if (!siblings.ok) return { ok: false, error: siblings.error }
+
+  const folders = siblings.items.filter((item) => item.isDirectory).map((item) => item.name)
+  const here = folders.indexOf(baseName(column.path))
+  if (here === -1) return { ok: false, error: 'not found in its parent' }
+
+  for (let i = here + delta; i >= 0 && i < folders.length; i += delta) {
+    const candidate = await window.finder.joinPath(parent, folders[i])
+    const listing = await window.finder.listDirectory(candidate)
+    if (!listing.ok) continue
+    const first = listing.items.find((item) => !item.isDirectory && STEP_KINDS.has(item.kind))
+    if (first) {
+      await openFolder(candidate)
+      await selectInColumn(state.columns.length - 1, first.name)
+      return { ok: true, name: first.name, folder: candidate }
+    }
+  }
+
+  showToast(delta > 0 ? 'No further media in the folders after this one.' : 'No media in the folders before this one.')
+  return { ok: false, error: 'nothing further' }
+}
+
+/**
+ * Show the step arrows only when there is something to step to.
+ *
+ * An arrow that does nothing is worse than no arrow, so the count of siblings is part
+ * of the decision, not a decoration.
+ */
+function renderStepControls() {
+  const column = activeColumn()
+  const pool = column ? column.items.filter((i) => !i.isDirectory && STEP_KINDS.has(i.kind)) : []
+  const index = state.selected ? pool.findIndex((i) => i.name === state.selected.name) : -1
+  const many = pool.length > 1
+
+  state.step = { total: pool.length, index, hasPrev: many && index > 0, hasNext: many && index !== -1 && index < pool.length - 1 }
+
+  // The arrows describe a POSITION among the media, so they only belong on screen when
+  // the selected item is one of them. On a text file they would show "0 of 4", which is
+  // a number that means nothing.
+  const show = Boolean(state.previewOpen && state.selected && !state.selected.isDirectory && index !== -1 && many)
+  el.previewSteps.hidden = !show
+
+  if (!show) return
+  el.previewPrev.disabled = !state.step.hasPrev
+  el.previewNext.disabled = !state.step.hasNext
+  el.mediaCount.textContent = `${index + 1} of ${pool.length}`
+  el.previewPrev.title = state.step.hasPrev ? 'Previous item (←)' : 'This is the first item'
+  el.previewNext.title = state.step.hasNext ? 'Next item (→)' : 'This is the last item'
+}
+
+/**
+ * Is the current selection one of the media assets that can be stepped through?
+ * The arrow keys need to know whether they mean "next take" or "next row".
+ */
+function selectionIsMedia() {
+  const column = activeColumn()
+  if (!column || !state.selected) return false
+  return column.items.some((i) => i.name === state.selected.name && !i.isDirectory && STEP_KINDS.has(i.kind))
+}
+
+/** Step to the previous or next previewable asset. */
+function stepPrev() {
+  return stepMedia(-1)
+}
+
+function stepNext() {
+  return stepMedia(1)
 }
 
 // ---------------------------------------------------------------------------
@@ -1991,6 +2130,8 @@ function setPreviewOpen(open) {
 
 el.previewToggle.addEventListener('click', () => setPreviewOpen(!state.previewOpen))
 el.previewClose.addEventListener('click', () => setPreviewOpen(false))
+el.previewPrev.addEventListener('click', () => stepPrev())
+el.previewNext.addEventListener('click', () => stepNext())
 
 el.quicklook.addEventListener('click', (event) => {
   if (event.target === el.quicklook) closeQuickLook()
@@ -2036,6 +2177,14 @@ document.addEventListener('keydown', async (event) => {
     if ([' ', 'Escape', 'Enter'].includes(event.key)) {
       event.preventDefault()
       closeQuickLook()
+    } else if (event.key === 'ArrowRight') {
+      // Stepping while Quick Look is open keeps it open — that is the whole point of a
+      // full-screen look at a folder of takes.
+      event.preventDefault()
+      await stepMedia(1)
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      await stepMedia(-1)
     }
     return
   }
@@ -2062,6 +2211,16 @@ document.addEventListener('keydown', async (event) => {
   } else if (event.key === 'ArrowUp') {
     event.preventDefault()
     moveSelection(-1)
+  } else if (event.key === 'ArrowRight') {
+    event.preventDefault()
+    // Stepping through the takes in a folder is what the owner asked for, but the arrows
+    // must never be dead: on a file that is not media they move the selection instead.
+    if (selectionIsMedia()) stepMedia(1)
+    else moveSelection(1)
+  } else if (event.key === 'ArrowLeft') {
+    event.preventDefault()
+    if (selectionIsMedia()) stepMedia(-1)
+    else moveSelection(-1)
   } else if (event.key === 'Enter' && state.selected) {
     event.preventDefault()
     const index = state.columns.findIndex((c) => c.selectedName === state.selected.name)

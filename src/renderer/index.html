@@ -112,7 +112,16 @@
           <span class="preview-name" id="previewName"></span>
           <span class="preview-meta" id="previewMeta"></span>
         </div>
-        <button type="button" class="icon-btn" id="previewClose" title="Hide preview" aria-label="Hide preview">
+        <div class="preview-steps" id="previewSteps" hidden>
+          <button type="button" class="icon-btn step-btn" id="previewPrev" title="Previous item (←)" aria-label="Previous item">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <span class="media-count" id="mediaCount" aria-live="polite"></span>
+          <button type="button" class="icon-btn step-btn" id="previewNext" title="Next item (→)" aria-label="Next item">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+        <button type="button" class="icon-btn close-btn" id="previewClose" title="Hide preview" aria-label="Hide preview">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         </button>
       </header>
