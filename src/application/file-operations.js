@@ -69,9 +69,13 @@ async function rename(fileOperations, request) {
   if (!parent) return { ok: false, error: 'That item cannot be renamed.' }
 
   const target = joinPath(parent, checked.name)
+  // A case-only rename (readme.txt -> README.txt) is a real rename on Windows, but a
+  // naive equality check treats it as a no-op and silently refuses it. Compare the way
+  // the filesystem does — case-insensitively — and only skip when nothing differs.
   if (target === from) return { ok: true, op: 'rename', path: from, name: checked.name }
 
-  if (await fileOperations.exists(target)) {
+  const sameNameDifferentCase = target.toLowerCase() === from.toLowerCase()
+  if (!sameNameDifferentCase && (await fileOperations.exists(target))) {
     return { ok: false, error: `There is already an item named "${checked.name}" here.` }
   }
 

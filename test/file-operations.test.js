@@ -101,7 +101,12 @@ function fakeOps({ present = [], fail = null } = {}) {
       existing.delete(target)
     },
     async exists(target) {
-      return existing.has(target)
+      // Windows filesystems are case-INSENSITIVE, and the fake disk must be too, or it
+      // cannot model the collisions this code exists to prevent. A case-sensitive fake
+      // reports "free" for a name Windows would refuse.
+      if (existing.has(target)) return true
+      const lower = target.toLowerCase()
+      return [...existing].some((p) => p.toLowerCase() === lower)
     }
   }
 }
@@ -177,6 +182,32 @@ test('renaming to the same name is a no-op success, not an error', async () => {
     { op: 'rename', path: 'C:\\a\\same.txt', name: 'same.txt' }
   )
   assert.equal(result.ok, true)
+  assert.equal(ops.calls.length, 0)
+})
+
+test('a case-only rename is performed, not refused as a collision', async () => {
+  // Windows is case-insensitive, so readme.txt -> README.txt looks like the target
+  // already exists. It is a real rename and must go through.
+  const ops = fakeOps({ present: ['C:\\a\\readme.txt'] })
+  const result = await performFileOperation(
+    { fileOperations: ops },
+    { op: 'rename', path: 'C:\\a\\readme.txt', name: 'README.txt' }
+  )
+  assert.equal(result.ok, true, `expected the rename to run, got ${result.error}`)
+  assert.equal(ops.calls.length, 1)
+  assert.deepEqual(ops.calls[0], ['rename', 'C:\\a\\readme.txt', 'C:\\a\\README.txt'])
+})
+
+test('renaming to a case-variant of a DIFFERENT file still refuses', async () => {
+  // Only the same file's own name may be re-cased. Renaming notes.txt to Report.txt
+  // while report.txt exists is a genuine collision on Windows, case notwithstanding.
+  const ops = fakeOps({ present: ['C:\\a\\notes.txt', 'C:\\a\\report.txt'] })
+  const result = await performFileOperation(
+    { fileOperations: ops },
+    { op: 'rename', path: 'C:\\a\\notes.txt', name: 'Report.txt' }
+  )
+  assert.equal(result.ok, false, 'a real collision must still be refused')
+  assert.match(result.error, /already an item named/)
   assert.equal(ops.calls.length, 0)
 })
 

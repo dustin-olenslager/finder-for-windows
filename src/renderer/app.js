@@ -176,13 +176,35 @@ function formatDate(value) {
 function formatKind(item) {
   if (item.isDirectory) return 'Folder'
   const kind = item.kind || 'other'
+  // A bare 'other' is not a kind, it is the absence of one, so it reads as Document
+  // with the extension as the specific part.
   const label = kind === 'other' ? 'Document' : kind[0].toUpperCase() + kind.slice(1)
   const extension = item.name.includes('.') ? item.name.split('.').pop().toUpperCase() : ''
-  return extension && extension !== label.toUpperCase() ? `${label} (${extension})` : label
+  // 'Pdf (PDF)' is noise; only name the extension when it adds something.
+  if (!extension || extension === label.toUpperCase()) return label
+  // A file with no name before the dot ('.gitignore') is not a 'Document (GITIGNORE)'.
+  if (item.name.startsWith('.')) return label
+  return `${label} (${extension})`
 }
 
 function pluralize(n, word) {
   return `${n} ${word}${n === 1 ? '' : 's'}`
+}
+
+/**
+ * The folder that contains a path.
+ *
+ * Derived by the same rule the rest of the app uses, because slicing at the last
+ * separator returns "C:" for "C:\Users\logo.png" — the drive root, not the folder.
+ */
+function folderOf(path) {
+  if (!path) return null
+  const cut = Math.max(path.lastIndexOf('\\'), path.lastIndexOf('/'))
+  if (cut < 0) return null
+  // Keep a drive root's trailing separator (C:\) and drop a bare root's.
+  if (cut === 2 && path[1] === ':') return path.slice(0, 3)
+  if (cut === 0) return path.slice(0, 1)
+  return path.slice(0, cut)
 }
 
 /** Case-insensitive, and stable so the order never flickers between renders. */
@@ -693,7 +715,7 @@ async function renderBreadcrumb() {
 }
 
 async function renderPreview() {
-  if (!state.previewOpen || !state.selected || state.selected.isDirectory) {
+  if (!state.previewOpen || !state.selected) {
     el.previewBody.replaceChildren()
     el.previewName.textContent = ''
     el.previewName.title = ''
@@ -703,12 +725,54 @@ async function renderPreview() {
 
   const item = state.selected
   const path = item.path || (await window.finder.joinPath(activePath(), item.name))
-  const token = ++previewToken
 
   el.previewName.textContent = item.name
   // The preview pane is narrow and a shot name like scene-01-take-01_VO.mp4 does
   // not fit, so the full name stays reachable on hover.
   el.previewName.title = item.name
+
+  // A folder has no contents to render, but a blank pane is not an answer: show what is
+  // inside it and how much. This used to leave the pane empty entirely.
+  if (item.isDirectory) {
+    const token = ++previewToken
+    el.previewMeta.textContent = 'Folder'
+    const listing = await window.finder.listDirectory(path)
+    if (token !== previewToken) return
+    const children = listing.ok ? listing.items : []
+    el.previewBody.replaceChildren()
+    const stage = document.createElement('div')
+    stage.className = 'preview-stage'
+    if (!listing.ok) {
+      stage.append(note(listing.error))
+    } else {
+      const list = document.createElement('div')
+      list.className = 'quicklook-list'
+      for (const child of children.slice(0, 40)) {
+        const line = document.createElement('div')
+        line.className = 'quicklook-line'
+        const glyph = document.createElement('span')
+        glyph.className = 'glyph'
+        glyph.innerHTML = iconFor(child)
+        const label = document.createElement('span')
+        label.className = 'name'
+        label.textContent = child.name
+        line.append(glyph, label)
+        list.append(line)
+      }
+      stage.append(list)
+      if (children.length > 40) stage.append(note(`and ${children.length - 40} more`))
+    }
+    el.previewBody.append(stage)
+
+    const info = buildInfoBlock(item, {
+      childCount: children.length,
+      folderCount: children.filter((c) => c.isDirectory).length
+    })
+    if (info) el.previewBody.append(info)
+    return
+  }
+
+  const token = ++previewToken
   el.previewMeta.textContent = `${formatKind(item)}${
     typeof item.size === 'number' ? ` · ${formatSize(item.size)}` : ''
   }`
@@ -740,8 +804,15 @@ function buildInfoBlock(item = {}, preview = {}) {
   // are appended by the caller once the element has loaded.
   add('Kind', formatKind(item))
   if (typeof item.size === 'number') add('Size', formatSize(item.size))
-  if (item.size === null) add('Size', 'Unknown')
-  add('Where', item.path ? item.path.slice(0, item.path.lastIndexOf('\\')) : null, { copy: true })
+  // A folder has no meaningful byte size, so it gets a count of what is inside instead
+  // of "Unknown" — which is what it used to say.
+  if (item.size === null && !item.isDirectory) add('Size', 'Unknown')
+  if (item.isDirectory && typeof preview.childCount === 'number') {
+    add('Contains', `${pluralize(preview.childCount, 'item')} · ${pluralize(preview.folderCount ?? 0, 'folder')}`)
+  }
+  // The folder is derived from the path, not by slicing off the last segment here: a
+  // naive slice turns C:\Users\logo.png into "C:".
+  add('Where', folderOf(item.path), { copy: true })
   // The full path, spelled out and copyable: this is the row the owner asked for, and
   // hiding it behind the folder row would make the obvious thing hard to find.
   add('Path', item.path, { copy: true })
@@ -771,19 +842,28 @@ function buildInfoBlock(item = {}, preview = {}) {
   return block
 }
 
-/** Read an image's natural size once it has decoded, and fill in the Dimensions row. */
+/**
+ * Append a Dimensions row to the info block.
+ *
+ * The image is not decoded when the block is built, so the row is added later. It must
+ * be appended as a PAIR after the last row, not inserted after a bare `dt`: inserting
+ * `dt` then `dd` after the Kind label splits Kind from its own value and shifts every
+ * cell below it by one.
+ */
+function appendDimensionRow(block, text) {
+  if (!block || block.querySelector('[data-dimensions]')) return
+  const dt = document.createElement('dt')
+  dt.textContent = 'Dimensions'
+  dt.dataset.dimensions = '1'
+  const dd = document.createElement('dd')
+  dd.textContent = text
+  block.append(dt, dd)
+}
+
 function measureImage(img, block) {
   const apply = () => {
     if (!block || !img.naturalWidth) return
-    const dt = document.createElement('dt')
-    dt.textContent = 'Dimensions'
-    const dd = document.createElement('dd')
-    dd.textContent = `${img.naturalWidth} × ${img.naturalHeight}`
-    // Dimensions read best right under Size, but the image is not decoded at build
-    // time, so the row is inserted here once it is known.
-    const anchor = [...block.querySelectorAll('dt')].find((node) => node.textContent === 'Kind')
-    if (anchor) anchor.after(dt, dd)
-    else block.prepend(dd), block.prepend(dt)
+    appendDimensionRow(block, `${img.naturalWidth} × ${img.naturalHeight}`)
   }
   if (img.complete && img.naturalWidth) apply()
   else img.addEventListener('load', apply, { once: true })
@@ -838,12 +918,7 @@ function fillPane(body, preview, path, name, item = {}) {
         'loadedmetadata',
         () => {
           if (!info || !video.videoWidth) return
-          const dt = document.createElement('dt')
-          dt.textContent = 'Dimensions'
-          const dd = document.createElement('dd')
-          dd.textContent = `${video.videoWidth} × ${video.videoHeight}`
-          const anchor = [...info.querySelectorAll('dt')].find((node) => node.textContent === 'Kind')
-          if (anchor) anchor.after(dt, dd)
+          appendDimensionRow(info, `${video.videoWidth} × ${video.videoHeight}`)
         },
         { once: true }
       )
@@ -940,7 +1015,7 @@ async function openQuickLook() {
   el.quicklookMeta.textContent = `${formatKind(item)}${
     typeof item.size === 'number' ? ` · ${formatSize(item.size)}` : ''
   }`
-  fillPane(el.quicklookBody, preview, path, item.name)
+  fillPane(el.quicklookBody, preview, path, item.name, item)
 }
 
 function closeQuickLook() {

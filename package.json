@@ -17,7 +17,8 @@
     "verify:index": "node scripts/verify-index.js",
     "lint": "eslint src test",
     "typecheck": "tsc -p jsconfig.json",
-    "format": "prettier --write \"src/**/*.{js,html,css,json}\" \"test/**/*.js\""
+    "format": "prettier --write \"src/**/*.{js,html,css,json}\" \"test/**/*.js\"",
+    "check:sanitize": "bash scripts/check-sanitize.sh"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",

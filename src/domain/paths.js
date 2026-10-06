@@ -117,7 +117,10 @@ function segments(value) {
   if (p === null) return []
   const isUnc = UNC.test(p)
   const parts = p.replace(/^[\\/]+/, '').split(/[\\/]+/).filter(Boolean)
-  if (isUnc) return parts.slice(0, 2).concat(parts.slice(2))
+  // A UNC breadcrumb must keep its leading pair on the FIRST crumb. Returning a bare
+  // "server" here makes the renderer rebuild "server\share\a" as a relative path, which
+  // then reaches fs.readdir as a path relative to the process working directory.
+  if (isUnc) return [`\\\\${parts[0]}`].concat(parts.slice(1))
   if (DRIVE_ROOTED.test(p)) return [`${p.slice(0, 2)}\\`].concat(parts.slice(1))
   if (p === '/') return ['/']
   return ['/'].concat(parts)

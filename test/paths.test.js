@@ -74,5 +74,7 @@ test('segments builds a breadcrumb, drive root first', () => {
   assert.deepEqual(segments('C:\\Users\\me'), ['C:\\', 'Users', 'me'])
   assert.deepEqual(segments('C:\\'), ['C:\\'])
   assert.deepEqual(segments('/home/me'), ['/', 'home', 'me'])
-  assert.deepEqual(segments('\\\\server\\share\\a'), ['server', 'share', 'a'])
+  // The share's leading pair rides on the first crumb, so a clickable breadcrumb
+  // rebuilds "\\\\server\\share\\a" and not the relative "server\\share\\a".
+  assert.deepEqual(segments('\\\\server\\share\\a'), ['\\\\server', 'share', 'a'])
 })

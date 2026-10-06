@@ -22,22 +22,40 @@ function createJsonIndexStore({ dataDir }) {
   const file = path.join(dataDir, 'index.json')
   const stateFile = path.join(dataDir, 'state.json')
 
+  // The search box fires on every keystroke, so re-reading and JSON-parsing the whole
+  // index each time is the single biggest avoidable cost in the app. Hold the parsed
+  // records and only re-parse when the file itself has changed (mtime + size).
+  let cache = null
+  let cacheKey = null
+
   return {
     file,
     stateFile,
 
     async read() {
       try {
+        const stat = await fs.stat(file)
+        const key = `${stat.mtimeMs}:${stat.size}`
+        if (cache && cacheKey === key) return cache
+
         const raw = await fs.readFile(file, 'utf8')
-        if (raw.trim() === '') return { records: [], savedAt: null }
+        if (raw.trim() === '') {
+          cache = { records: [], savedAt: null }
+          cacheKey = key
+          return cache
+        }
         const parsed = JSON.parse(raw)
-        return {
+        cache = {
           records: Array.isArray(parsed.records) ? parsed.records : [],
           savedAt: parsed.savedAt ?? null,
           stats: parsed.stats ?? null
         }
+        cacheKey = key
+        return cache
       } catch {
         // A missing or unreadable index is not an error: it is rebuilt from the disk.
+        cache = null
+        cacheKey = null
         return { records: [], savedAt: null }
       }
     },
@@ -50,6 +68,9 @@ function createJsonIndexStore({ dataDir }) {
       const payload = JSON.stringify({ savedAt: Date.now(), stats, records })
       await fs.writeFile(temp, payload, 'utf8')
       await fs.rename(temp, file)
+      // The write invalidates the cache; drop it so the next read re-parses.
+      cache = null
+      cacheKey = null
       return { savedAt: Date.now(), count: records.length }
     },
 

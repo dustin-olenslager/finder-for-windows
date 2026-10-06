@@ -176,7 +176,9 @@ with sync_playwright() as p:
         open: !document.getElementById('quicklook').hidden,
         name: document.getElementById('quicklookName').textContent,
         meta: document.getElementById('quicklookMeta').textContent,
-        lines: document.querySelectorAll('.quicklook-line').length,
+        // Scoped to the Quick Look body: the preview pane renders its own folder list,
+        // and an unscoped count would add the two together.
+        lines: document.querySelectorAll('#quicklookBody .quicklook-line').length,
         summary: document.querySelector('.quicklook-summary')?.textContent || ''
     })""")
     check("space opens Quick Look", ql["open"] is True)
@@ -683,6 +685,70 @@ with sync_playwright() as p:
 
     pg.click('.sidebar-item:has-text("Home")')
     pg.wait_for_timeout(700)
+
+    # --- the preview pane tells the truth about what is selected ---
+    # These four were found by reviewing the pane against the real app; each was a real
+    # defect, so each gets a check that fails if it returns.
+    pg.click('.sidebar-item:has-text("Home")')
+    pg.wait_for_timeout(700)
+
+    def info_rows():
+        return pg.evaluate(
+            """() => {
+                const block = document.querySelector('.info-block');
+                if (!block) return null;
+                const pairs = [];
+                const kids = [...block.children];
+                for (let i = 0; i < kids.length; i += 2) {
+                    pairs.push([kids[i]?.textContent ?? '', kids[i + 1]?.textContent ?? '']);
+                }
+                return {
+                    dt: block.querySelectorAll('dt').length,
+                    dd: block.querySelectorAll('dd').length,
+                    pairs,
+                    meta: document.getElementById('previewMeta').textContent,
+                    bodyEmpty: document.getElementById('previewBody').children.length === 0
+                };
+            }"""
+        )
+
+    # D5: Where must name the containing FOLDER, not the drive.
+    pg.click('.row[data-name="readme.txt"]')
+    pg.wait_for_timeout(800)
+    rows = info_rows()
+    where = dict(rows["pairs"]).get("Where", "")
+    check("the Where row names the folder, not the drive", where == "C:\\Users\\dustin", where)
+
+    # D6: a PDF reads as 'PDF', not 'Pdf (PDF)'.
+    check("the kind reads cleanly for a PDF", "Pdf" not in rows["meta"], rows["meta"])
+
+    # D4: label/value pairs must stay aligned, one dd per dt.
+    check("every info label has exactly one value", rows["dt"] == rows["dd"], f"{rows['dt']} dt vs {rows['dd']} dd")
+
+    # D3: a folder must describe itself instead of leaving the pane blank.
+    pg.click('.row[data-name="Projects"]')
+    pg.wait_for_timeout(900)
+    folder = info_rows()
+    check("a folder does not leave the preview pane blank", folder is not None and not folder["bodyEmpty"], str(folder)[:200])
+    check("a folder reports what it contains", any(k == "Contains" for k, _ in folder["pairs"]), str(folder["pairs"]))
+    check("a folder never claims an unknown size", not any(k == "Size" and v == "Unknown" for k, v in folder["pairs"]), str(folder["pairs"]))
+
+    # D2: Quick Look must show the same facts, and must not throw.
+    pg.click('.row[data-name="readme.txt"]')
+    pg.wait_for_timeout(600)
+    pg.keyboard.press("Space")
+    pg.wait_for_timeout(900)
+    ql = pg.evaluate(
+        """() => ({
+            open: !document.getElementById('quicklook').hidden,
+            hasInfo: !!document.querySelector('#quicklookBody .info-block'),
+            meta: document.getElementById('quicklookMeta').textContent
+        })"""
+    )
+    check("Quick Look opens", ql["open"] is True, str(ql))
+    check("Quick Look shows the file facts, not just the content", ql["hasInfo"] is True, str(ql))
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(400)
 
     # Recomputed at the very end, after everything above has moved the UI around.
     leaked = hidden_but_visible()
