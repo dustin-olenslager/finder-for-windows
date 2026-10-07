@@ -83,7 +83,27 @@ function createContainer() {
     pathSegments: (dirPath) => segments(dirPath),
 
     getPreview: (filePath, name) => getPreview({ fileReader }, filePath, name),
-    performFileOperation: (request) => performFileOperation({ fileOperations }, request),
+
+    /**
+     * The drive list is consulted so a mapped network drive can be refused before anything
+     * is deleted: those have no Recycle Bin, and Electron deletes them permanently while
+     * reporting success. The lookup is best-effort — if it fails, the trash path falls back
+     * to the UNC-only rule rather than blocking a legitimate delete.
+     */
+    performFileOperation: async (request) => {
+      let networkRoots = []
+      if (request?.op === 'trash') {
+        try {
+          const listed = await drives.list()
+          networkRoots = (listed?.drives ?? listed ?? [])
+            .filter((d) => d.kind === 'network')
+            .map((d) => d.path)
+        } catch {
+          networkRoots = []
+        }
+      }
+      return performFileOperation({ fileOperations, networkRoots }, request)
+    },
     transfer: (request) => transferFiles({ fileOperations }, request),
     dropFiles: (request) => dropFiles({ fileOperations }, request),
 

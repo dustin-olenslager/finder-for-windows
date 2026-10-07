@@ -143,4 +143,44 @@ function isRecyclable(target) {
   return !/^[\\/]{2}/.test(normalized)
 }
 
-module.exports = { normalizePath, parentOf, joinPath, isRoot, segments, isDriveBare, isRecyclable }
+/**
+ * Is this path on a drive that the platform reported as a NETWORK drive?
+ *
+ * A mapped drive (Z: pointing at \\server\share) has no Recycle Bin, and Electron does
+ * not fail on one: `shell.trashItem` deletes the file permanently and reports success.
+ * That is the worst possible outcome — an unrecoverable delete reported as a recoverable
+ * one — so it is refused instead.
+ *
+ * It cannot be told from the path alone; only the drive list knows. So the caller passes
+ * the roots the platform reported as network drives, and this stays a pure comparison.
+ *
+ * @param {string} target
+ * @param {string[]} networkRoots drive roots such as ['Z:\\']
+ */
+function isNetworkDrivePath(target, networkRoots) {
+  const normalized = normalizePath(target)
+  if (!normalized) return false
+  const roots = Array.isArray(networkRoots) ? networkRoots : []
+  const lower = normalized.toLowerCase()
+
+  return roots.some((root) => {
+    const base = normalizePath(root)
+    if (!base) return false
+    // Compare without a trailing separator, so 'Z:\' and 'Z:' agree.
+    const stem = base.replace(/[\\/]+$/, '').toLowerCase()
+    if (stem === '') return false
+    // The separator must follow, or 'Z:\' would be reported as containing 'ZZ:\'.
+    return lower === stem || lower.startsWith(`${stem}\\`) || lower.startsWith(`${stem}/`)
+  })
+}
+
+module.exports = {
+  normalizePath,
+  parentOf,
+  joinPath,
+  isRoot,
+  segments,
+  isDriveBare,
+  isRecyclable,
+  isNetworkDrivePath
+}

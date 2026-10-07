@@ -700,6 +700,17 @@ function renderSearchResults() {
     return
   }
 
+  if (state.searchError) {
+    // A search that could not RUN is not a search that found nothing. Saying "nothing
+    // matches" here would be a lie about the user's files.
+    const failed = document.createElement('p')
+    failed.className = 'error'
+    failed.setAttribute('role', 'alert')
+    failed.textContent = `The search could not be run. ${state.searchError}`
+    el.content.append(failed)
+    return
+  }
+
   if (state.searchResults.length === 0) {
     const empty = document.createElement('p')
     empty.className = 'hint'
@@ -918,10 +929,15 @@ function renderColumns() {
     const items = presentItems(column.items)
 
     if (items.length === 0) {
-      const empty = document.createElement('p')
-      empty.className = 'hint'
-      empty.textContent = state.filter.trim() ? 'No matches here.' : 'Empty'
-      pane.append(empty)
+      // Only claim the folder is empty when it could actually be read. Under a
+      // permission error the banner above already says it could not be, and printing
+      // "Empty" underneath it says the opposite.
+      if (!column.error) {
+        const empty = document.createElement('p')
+        empty.className = 'hint'
+        empty.textContent = state.filter.trim() ? 'No matches here.' : 'Empty'
+        pane.append(empty)
+      }
     } else {
       for (const item of items) {
         const row = buildRow(item)
@@ -2474,7 +2490,6 @@ function contextItemsFor(kind) {
   const hasSelection = Boolean(state.selected)
 
   if (kind === 'item') {
-    const isFolder = Boolean(state.selected?.isDirectory)
     return [
       { label: 'Open', accel: 'Enter', run: openSelected },
       { label: 'Open in Windows Explorer', run: revealSelected },
@@ -2493,9 +2508,11 @@ function contextItemsFor(kind) {
       { label: 'Copy Name', run: copySelectedName },
       { separator: true },
       { label: 'Rename…', accel: 'F2', run: renameSelected },
-      // A folder cannot be renamed away while you are standing in it, and this app has
-      // no recursive delete yet, so the honest thing is not to offer it.
-      isFolder ? null : { label: 'Move to Recycle Bin', accel: 'Delete', run: trashSelected }
+      // Offered for a folder too. It used to be omitted here with a comment claiming the
+      // app has "no recursive delete yet" — but the Recycle Bin does recursion natively,
+      // and the File menu and the Delete key already bin folders. Hiding it in one of the
+      // three places made the same command look available and unavailable at once.
+      { label: 'Move to Recycle Bin', accel: 'Delete', run: trashSelected }
     ].filter(Boolean)
   }
 

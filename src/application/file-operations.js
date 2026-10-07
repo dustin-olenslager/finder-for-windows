@@ -17,13 +17,13 @@
  */
 
 const { validateName } = require('../domain/file-name')
-const { normalizePath, parentOf, joinPath, isRecyclable } = require('../domain/paths')
+const { normalizePath, parentOf, joinPath, isRecyclable, isNetworkDrivePath } = require('../domain/paths')
 
 /**
  * @param {{ fileOperations: { mkdir: Function, rename: Function, trash: Function, exists: Function } }} deps
  * @param {{ op: string, path?: string, name?: string, target?: string }} request
  */
-async function performFileOperation({ fileOperations }, request) {
+async function performFileOperation({ fileOperations, networkRoots = [] }, request) {
   const op = request?.op
 
   try {
@@ -33,7 +33,7 @@ async function performFileOperation({ fileOperations }, request) {
       case 'rename':
         return await rename(fileOperations, request)
       case 'trash':
-        return await trash(fileOperations, request)
+        return await trash(fileOperations, request, networkRoots)
       default:
         return { ok: false, error: `Unknown operation: ${op}` }
     }
@@ -83,7 +83,12 @@ async function rename(fileOperations, request) {
   return { ok: true, op: 'rename', path: target, name: checked.name, from }
 }
 
-async function trash(fileOperations, request) {
+/**
+ * @param {object} fileOperations
+ * @param {{ path?: string }} request
+ * @param {string[]} networkRoots drive roots the platform reported as network drives
+ */
+async function trash(fileOperations, request, networkRoots = []) {
   const target = normalizePath(request.path)
   if (!target) return { ok: false, error: 'An item to move to the Recycle Bin is required.' }
 
@@ -100,6 +105,18 @@ async function trash(fileOperations, request) {
     return {
       ok: false,
       error: 'A file on a network location cannot go to the Recycle Bin. Nothing was deleted.'
+    }
+  }
+
+  // A mapped drive (Z: pointing at a share) has the same problem as a UNC path and the
+  // same failure mode, but its path looks local — only the drive list knows. This is the
+  // worst outcome the app can produce: a permanent delete reported as a recoverable one.
+  if (isNetworkDrivePath(target, networkRoots)) {
+    return {
+      ok: false,
+      error:
+        'That is a mapped network drive, which has no Recycle Bin. Nothing was deleted — ' +
+        'deleting it here would be permanent and could not be undone.'
     }
   }
 

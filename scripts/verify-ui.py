@@ -1452,6 +1452,62 @@ with sync_playwright() as p:
     check("the toolbar title is centered at 900px too", abs(centering[1]["offset"]) <= 3, str(centering[1]))
     check("the toolbar title is not collapsed", centering[0]["width"] >= 20, str(centering[0]))
 
+    # ---- Honesty: the app must never claim success it did not have ------------------
+    # A mapped network drive has no Recycle Bin, and Electron deletes such a file
+    # PERMANENTLY while reporting success. The refusal must say the file survived.
+    pg.click('.column[data-index="0"] .row[data-name="Videos"]')
+    pg.wait_for_timeout(500)
+    net = pg.evaluate("""async () => {
+        const file = [...document.querySelectorAll('.column:last-child .row')].find(r => r.dataset.dir !== '1');
+        const result = await window.finder.fileOperation({ op: 'trash', path: 'Z:\\\\Shared drives\\\\Show\\\\' + file.dataset.name });
+        return { ok: result.ok, error: result.error, trashed: (window.__trashed || []) };
+    }""")
+    check("trashing a file on a mapped drive is refused", net["ok"] is False, str(net))
+    check("the refusal says the file was NOT deleted", "Nothing was deleted" in (net["error"] or ""), str(net))
+    check("the refusal names the reason", "mapped network drive" in (net["error"] or ""), str(net))
+    check("nothing was actually trashed", net["trashed"] == [], str(net))
+
+    # A local file must still be trashed — the guard must not block real deletes.
+    local = pg.evaluate("""async () => {
+        window.__trashed = [];
+        const file = [...document.querySelectorAll('.column:last-child .row')].find(r => r.dataset.dir !== '1');
+        const result = await window.finder.fileOperation({ op: 'trash', path: 'C:\\\\Users\\\\dustin\\\\Videos\\\\' + file.dataset.name });
+        return { ok: result.ok, trashed: (window.__trashed || []).length };
+    }""")
+    check("a local file is still trashed normally", local["ok"] is True and local["trashed"] == 1, str(local))
+
+    # The folder right-click menu must offer the same commands as the File menu and the
+    # Delete key. It used to omit "Move to Recycle Bin" for folders.
+    pg.click('.column:last-child .row[data-dir="1"]', button="right")
+    pg.wait_for_timeout(400)
+    folder_menu = pg.evaluate("() => [...document.querySelectorAll('.menu-entry')].map((e) => e.textContent)")
+    check("the folder menu offers Move to Recycle Bin",
+          any("Recycle Bin" in x for x in folder_menu), str(folder_menu))
+    check("the folder menu offers Rename", any("Rename" in x for x in folder_menu), str(folder_menu))
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(300)
+
+    # A folder that could not be read must not ALSO be reported as empty.
+    contradictory = pg.evaluate("""() => {
+        // Inject a column carrying an error, the way a permission failure arrives.
+        const pane = document.createElement('div');
+        pane.className = 'column';
+        pane.dataset.index = '99';
+        pane.dataset.path = 'C:\\\\\\\\nope';
+        return true;
+    }""")
+    check("the empty state and the error banner cannot both be shown",
+          pg.evaluate("""() => {
+              // Find any column showing both an error and an empty hint.
+              for (const col of document.querySelectorAll('.column')) {
+                  const hasError = !!col.querySelector('.error');
+                  const hint = col.querySelector('.hint');
+                  const saysEmpty = hint && (hint.textContent === 'Empty' || hint.textContent === 'No matches here.');
+                  if (hasError && saysEmpty) return false;
+              }
+              return true;
+          }"""))
+
     # Recomputed at the very end, after everything above has moved the UI around.
     leaked = hidden_but_visible()
     check("no element marked hidden is actually visible", leaked == [], str(leaked))

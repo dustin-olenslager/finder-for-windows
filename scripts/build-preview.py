@@ -206,7 +206,28 @@ window.finder = {
     }
     return { ok: true, mode: 'system', kind: 'other', extension: '', note: 'No preview for this file type.' };
   },
-  async fileOperation() { return { ok: true }; },
+  // Mirrors the real trash rule closely enough to assert against: a mapped network drive
+  // has no Recycle Bin, so it is refused and nothing is deleted. A refusal that reads like
+  // a failure would make the user think the file went anyway, so the message says so.
+  async fileOperation(request) {
+    const op = request && request.op;
+    if (op !== 'trash') return { ok: true };
+    const target = String((request && request.path) || '');
+    const networkRoots = ['Z:\\\\', 'Y:\\\\'];
+    const stem = (p) => String(p).replace(/[\\\\/]+$/, '').toLowerCase();
+    const isNetwork = networkRoots.some((root) => {
+      const s = stem(root);
+      return target.toLowerCase() === s || target.toLowerCase().startsWith(s + '\\\\') || target.toLowerCase().startsWith(s + '/');
+    });
+    if (isNetwork) {
+      return {
+        ok: false,
+        error: 'That is a mapped network drive, which has no Recycle Bin. Nothing was deleted \u2014 deleting it here would be permanent and could not be undone.'
+      };
+    }
+    window.__trashed = (window.__trashed || []).concat([target]);
+    return { ok: true, op: 'trash', path: target };
+  },
   // Mirrors the real transfer use case closely enough to be worth asserting against:
   // it MOVES or COPIES entries in the fixture tree, so a test can prove the item really
   // arrived rather than trusting a toast. It refuses an occupied destination, the same
