@@ -1292,6 +1292,166 @@ with sync_playwright() as p:
     check("a drop on the window does not navigate away",
           pg.evaluate("() => location.href.startsWith('file:')"))
 
+    # ---- Quick Look controls, and the shortcut sheet --------------------------------
+    pg.click('.column[data-index="0"] .row[data-name="Videos"]')
+    pg.wait_for_timeout(500)
+    # Select a file, then open Quick Look with the space bar — the way the owner found it.
+    pg.click('.column:last-child .row[data-dir=""]')
+    pg.wait_for_timeout(250)
+    pg.keyboard.press(" ")
+    pg.wait_for_timeout(700)
+
+    ql = pg.evaluate("""() => {
+        const steps = document.getElementById('quicklookSteps');
+        return {
+            open: !document.getElementById('quicklook').hidden,
+            stepsShown: !steps.hidden,
+            count: document.getElementById('quicklookCount').textContent,
+            prevDisabled: document.getElementById('quicklookPrev').disabled,
+            hasClose: !!document.getElementById('quicklookClose')
+        };
+    }""")
+    check("the space bar opens Quick Look", ql["open"] is True, str(ql))
+    check("Quick Look shows where you are in the folder", ql["stepsShown"] and " of " in ql["count"], str(ql))
+    check("the first file cannot step backwards", ql["prevDisabled"] is True, str(ql))
+    check("Quick Look has a visible close button", ql["hasClose"] is True, str(ql))
+
+    # The arrow must actually MOVE, not merely exist.
+    before_name = pg.evaluate("() => document.getElementById('quicklookName').textContent")
+    before_count = ql["count"]
+    pg.click("#quicklookNext")
+    pg.wait_for_timeout(700)
+    after_name = pg.evaluate("() => document.getElementById('quicklookName').textContent")
+    after_count = pg.evaluate("() => document.getElementById('quicklookCount').textContent")
+    check("the Quick Look next arrow moves to another file", before_name != after_name, f"{before_name} -> {after_name}")
+    check("the counter advances with it", before_count != after_count, f"{before_count} -> {after_count}")
+
+    # And it walks EVERY file, not only media: the difference from the preview pane.
+    walked = pg.evaluate("""() => {
+        const seen = [document.getElementById('quicklookName').textContent];
+        return seen;
+    }""")
+    kinds = pg.evaluate("""() => {
+        const rows = [...document.querySelectorAll('.column:last-child .row')];
+        const files = rows.filter(r => r.dataset.dir !== '1');
+        return { total: files.length, kinds: files.map(r => r.dataset.kind) };
+    }""")
+    check("Quick Look counts every file in the folder, not just media",
+          f"of {kinds['total']}" in after_count, f"{after_count} vs {kinds}")
+
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(400)
+    check("Escape closes Quick Look", pg.evaluate("() => document.getElementById('quicklook').hidden") is True)
+
+    # Re-open, so the overlay's OWN close button can be exercised — it is the visible
+    # control for a view whose only other exits are the space bar and Escape.
+    pg.keyboard.press(" ")
+    pg.wait_for_timeout(700)
+    check("the space bar re-opens Quick Look", pg.evaluate("() => !document.getElementById('quicklook').hidden"))
+    pg.click("#quicklookClose")
+    pg.wait_for_timeout(500)
+    check("the Quick Look close button closes it",
+          pg.evaluate("() => document.getElementById('quicklook').hidden") is True)
+    pg.click("#quicklookBtn")
+    pg.wait_for_timeout(700)
+    check("the toolbar button opens Quick Look", pg.evaluate("() => !document.getElementById('quicklook').hidden"))
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(400)
+
+    # The menu bar lists it too, so the same command is reachable three ways.
+    pg.click('.menubar-item[data-menu="view"]')
+    pg.wait_for_timeout(400)
+    view_items = pg.evaluate("() => [...document.querySelectorAll('.menu-entry')].map((e) => e.textContent)")
+    check("the View menu lists Quick Look", any("Quick Look" in x for x in view_items), str(view_items))
+    check("the View menu lists Keyboard Shortcuts", any("Keyboard Shortcuts" in x for x in view_items), str(view_items))
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(300)
+
+    # The shortcut sheet itself.
+    pg.keyboard.press("Control+/")
+    pg.wait_for_timeout(600)
+    sheet = pg.evaluate("""() => {
+        const modal = document.querySelector('.modal');
+        if (!modal) return null;
+        const columns = modal.querySelector('.shortcut-columns');
+        return {
+            groups: [...modal.querySelectorAll('.shortcut-group-title')].map((h) => h.textContent),
+            keys: [...modal.querySelectorAll('kbd')].map((k) => k.textContent),
+            caps: modal.querySelectorAll('kbd').length,
+            cols: columns ? getComputedStyle(columns).gridTemplateColumns.split(' ').length : 0,
+            isDialog: modal.querySelector('.modal-card').getAttribute('role') === 'dialog'
+        };
+    }""")
+    check("Ctrl+/ opens the keyboard shortcut sheet", sheet is not None, str(sheet))
+    check("the sheet is grouped, not one flat list", sheet and len(sheet["groups"]) >= 3, str(sheet and sheet["groups"]))
+    check("the sheet names the groups", sheet and "Preview and Quick Look" in sheet["groups"], str(sheet and sheet["groups"]))
+    check("the sheet lists Copy, Cut, Paste and Select All",
+          bool(sheet) and all(k in sheet["keys"] for k in ["Ctrl+C", "Ctrl+X", "Ctrl+V", "Ctrl+A"]),
+          str(sheet and sheet["keys"]))
+    check("the sheet lists Quick Look, Refresh and its own shortcut",
+          bool(sheet) and all(k in sheet["keys"] for k in ["Space", "F5", "Ctrl+/"]), str(sheet and sheet["keys"]))
+    check("every key is drawn as a keycap", bool(sheet) and sheet["caps"] >= 20, str(sheet and sheet["caps"]))
+    check("the sheet lays out in two columns", bool(sheet) and sheet["cols"] == 2, str(sheet and sheet["cols"]))
+    check("the sheet announces itself as a dialog", bool(sheet) and sheet["isDialog"], str(sheet and sheet["isDialog"]))
+
+    # Measured, because both of these were real defects that a look alone did not catch:
+    # the wide-card rule was declared before the rule it had to override, so the sheet
+    # rendered 340px wide and ran off the bottom of the window, and the steppers were
+    # 26x24 — under the 32px comfortable pointer target.
+    geometry = pg.evaluate("""() => {
+        const card = document.querySelector('.modal-card');
+        const r = card.getBoundingClientRect();
+        return {
+            width: Math.round(r.width),
+            overflowsBottom: r.bottom > window.innerHeight,
+            overflowsRight: r.right > window.innerWidth
+        };
+    }""")
+    check("the shortcut sheet is wide enough for two columns", geometry["width"] >= 700, str(geometry))
+    check("the shortcut sheet fits in the window", not geometry["overflowsBottom"] and not geometry["overflowsRight"], str(geometry))
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(400)
+
+    # The steppers, measured while Quick Look is actually on screen.
+    pg.keyboard.press(" ")
+    pg.wait_for_timeout(800)
+    steppers = pg.evaluate("""() => {
+        if (document.getElementById('quicklook').hidden) return { open: false };
+        const out = { open: true };
+        for (const id of ['quicklookPrev', 'quicklookNext']) {
+            const r = document.getElementById(id).getBoundingClientRect();
+            out[id] = [Math.round(r.width), Math.round(r.height)];
+        }
+        return out;
+    }""")
+    check("Quick Look is open when the arrows are measured", steppers.get("open") is True, str(steppers))
+    check("the Quick Look arrows meet the 32px pointer target",
+          bool(steppers.get("open")) and all(w >= 32 and h >= 32 for k, v in steppers.items() if k != "open" for w, h in [v]),
+          str(steppers))
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(400)
+
+    # The toolbar title, measured at two widths. This was the visual audit's #1 defect:
+    # two `flex: 1` groups do NOT center a title, because a flex item will not shrink
+    # below its content — so the wider right-hand group won. It is now a three-column
+    # grid with minmax(0, 1fr), and this check is what keeps it centered when the next
+    # control is added to either side.
+    centering = []
+    for width in (1180, 900):
+        pg.set_viewport_size({"width": width, "height": 800})
+        pg.wait_for_timeout(350)
+        centering.append(
+            pg.evaluate("""() => {
+                const t = document.getElementById('folderTitle').getBoundingClientRect();
+                return { offset: Math.round((t.left + t.width / 2) - window.innerWidth / 2), width: Math.round(t.width) };
+            }""")
+        )
+    pg.set_viewport_size({"width": 1180, "height": 800})
+    pg.wait_for_timeout(300)
+    check("the toolbar title is centered at 1180px", abs(centering[0]["offset"]) <= 3, str(centering[0]))
+    check("the toolbar title is centered at 900px too", abs(centering[1]["offset"]) <= 3, str(centering[1]))
+    check("the toolbar title is not collapsed", centering[0]["width"] >= 20, str(centering[0]))
+
     # Recomputed at the very end, after everything above has moved the UI around.
     leaked = hidden_but_visible()
     check("no element marked hidden is actually visible", leaked == [], str(leaked))

@@ -55,10 +55,16 @@ const el = {
   zoomIn: document.getElementById('zoomIn'),
   zoomOut: document.getElementById('zoomOut'),
   zoomValue: document.getElementById('zoomValue'),
+  quicklookBtn: document.getElementById('quicklookBtn'),
   quicklook: document.getElementById('quicklook'),
   quicklookBody: document.getElementById('quicklookBody'),
   quicklookName: document.getElementById('quicklookName'),
-  quicklookMeta: document.getElementById('quicklookMeta')
+  quicklookMeta: document.getElementById('quicklookMeta'),
+  quicklookSteps: document.getElementById('quicklookSteps'),
+  quicklookCount: document.getElementById('quicklookCount'),
+  quicklookPrev: document.getElementById('quicklookPrev'),
+  quicklookNext: document.getElementById('quicklookNext'),
+  quicklookClose: document.getElementById('quicklookClose'),
 }
 
 // ---------------------------------------------------------------------------
@@ -1330,6 +1336,7 @@ async function openQuickLook() {
   el.quicklook.hidden = false
   el.quicklookName.textContent = item.name
   el.quicklookBody.replaceChildren()
+  renderQuickLookSteps()
 
   if (item.isDirectory) {
     // Space on a folder tells you what is inside it, which is genuinely useful.
@@ -1378,6 +1385,33 @@ function closeQuickLook() {
   state.quickLookOpen = false
   el.quicklook.hidden = true
   el.quicklookBody.replaceChildren()
+}
+
+/**
+ * The arrows in Quick Look, and the counter beside them.
+ *
+ * Unlike the preview pane's arrows, these walk EVERY file, not only media: Quick Look is
+ * the "look at this" view, so the right arrow should always move to the next thing rather
+ * than stopping dead on a text file. That is also what makes the counter meaningful —
+ * "4 of 12" is a fact about the folder, not about its videos.
+ *
+ * Hidden for a folder, which has nothing to step through, and when the folder holds a
+ * single file, where a position of "1 of 1" would be noise.
+ */
+function renderQuickLookSteps() {
+  const column = activeColumn()
+  const pool = column ? presentItems(column.items).filter((item) => !item.isDirectory) : []
+  const index = state.selected ? pool.findIndex((item) => item.name === state.selected.name) : -1
+
+  const show = pool.length > 1 && index !== -1
+  el.quicklookSteps.hidden = !show
+  if (!show) return
+
+  el.quicklookCount.textContent = `${index + 1} of ${pool.length}`
+  el.quicklookPrev.disabled = index <= 0
+  el.quicklookNext.disabled = index >= pool.length - 1
+  el.quicklookPrev.title = el.quicklookPrev.disabled ? 'This is the first file' : 'Previous file (←)'
+  el.quicklookNext.title = el.quicklookNext.disabled ? 'This is the last file' : 'Next file (→)'
 }
 
 // ---------------------------------------------------------------------------
@@ -2147,6 +2181,8 @@ const MENUS = {
       { label: 'Show Preview', accel: 'Ctrl+I', run: () => setPreviewOpen(!state.previewOpen) },
       { label: 'Quick Look', accel: 'Space', run: openQuickLook },
       { separator: true },
+      { label: 'Keyboard Shortcuts', accel: 'Ctrl+/', run: showShortcuts },
+      { separator: true },
       { label: 'Larger', accel: 'Ctrl+=', run: () => zoomBy(1) },
       { label: 'Smaller', accel: 'Ctrl+-', run: () => zoomBy(-1) },
       { label: 'Actual Size', accel: 'Ctrl+0', run: zoomReset },
@@ -2282,46 +2318,103 @@ function setView(view) {
   render()
 }
 
+/**
+ * The keyboard shortcut sheet.
+ *
+ * Grouped and in two columns, because a flat list of seventeen rows is a wall, and the
+ * thing a person wants is one group — "what does the preview do" — not the whole list.
+ *
+ * It is also COMPLETE: the previous version omitted Copy, Cut, Paste, Select All and
+ * Refresh, which are the five keys someone is most likely to reach for.
+ */
 function showShortcuts() {
-  const rows = [
-    ['Space', 'Quick Look'],
-    ['← / →', 'Previous / next item (media) or move the selection'],
-    ['↑ / ↓', 'Move the selection'],
-    ['Enter', 'Open'],
-    ['F2', 'Rename'],
-    ['Ctrl+Shift+N', 'New Folder'],
-    ['Delete', 'Move to Recycle Bin'],
-    ['Ctrl+F', 'Search'],
-    ['Esc', 'Back to the folder'],
-    ['Ctrl+I', 'Show or hide the preview'],
-    ['Ctrl+1 / 2 / 3', 'Columns / List / Icons'],
-    ['Ctrl+= / Ctrl+-', 'Larger / smaller interface'],
-    ['Ctrl+0', 'Actual size (100%)'],
-    ['Ctrl+Shift+C', 'Copy the selected item’s path'],
-    ['Backspace', 'Back'],
-    ['Alt+← / →', 'Back / Forward'],
-    ['Alt+↑', 'Enclosing folder']
+  const groups = [
+    {
+      name: 'Preview and Quick Look',
+      rows: [
+        ['Space', 'Quick Look — a full look at the selected item'],
+        ['← / →', 'Previous / next file while Quick Look is open'],
+        ['Ctrl+I', 'Show or hide the preview pane'],
+        ['Ctrl+/', 'This list']
+      ]
+    },
+    {
+      name: 'Moving around',
+      rows: [
+        ['↑ / ↓', 'Move the selection'],
+        ['Shift+↑ / ↓', 'Extend the selection'],
+        ['Enter', 'Open'],
+        ['Backspace', 'Back'],
+        ['Alt+← / →', 'Back / Forward'],
+        ['Alt+↑', 'Enclosing folder'],
+        ['Esc', 'Close what is open, or leave the search'],
+        ['F5', 'Refresh the folder']
+      ]
+    },
+    {
+      name: 'Files',
+      rows: [
+        ['Ctrl+C', 'Copy'],
+        ['Ctrl+X', 'Cut'],
+        ['Ctrl+V', 'Paste'],
+        ['Ctrl+A', 'Select all'],
+        ['F2', 'Rename'],
+        ['Delete', 'Move to Recycle Bin'],
+        ['Ctrl+Shift+N', 'New Folder'],
+        ['Ctrl+Shift+C', 'Copy the path']
+      ]
+    },
+    {
+      name: 'The window',
+      rows: [
+        ['Ctrl+F', 'Search'],
+        ['Ctrl+1 / 2 / 3', 'Columns / List / Icons'],
+        ['Ctrl+= / Ctrl+-', 'Larger / smaller interface'],
+        ['Ctrl+0', 'Actual size (100%)']
+      ]
+    }
   ]
 
   const overlay = document.createElement('div')
   overlay.className = 'modal'
   const card = document.createElement('div')
   card.className = 'modal-card modal-card-wide'
+  card.setAttribute('role', 'dialog')
+  card.setAttribute('aria-modal', 'true')
+  card.setAttribute('aria-label', 'Keyboard Shortcuts')
+
   const title = document.createElement('h2')
   title.className = 'modal-title'
   title.textContent = 'Keyboard Shortcuts'
   card.append(title)
 
-  const list = document.createElement('dl')
-  list.className = 'shortcut-list'
-  for (const [keys, what] of rows) {
-    const dt = document.createElement('dt')
-    dt.textContent = keys
-    const dd = document.createElement('dd')
-    dd.textContent = what
-    list.append(dt, dd)
+  const columns = document.createElement('div')
+  columns.className = 'shortcut-columns'
+  for (const group of groups) {
+    const section = document.createElement('section')
+    section.className = 'shortcut-group'
+    const heading = document.createElement('h3')
+    heading.className = 'shortcut-group-title'
+    heading.textContent = group.name
+    const list = document.createElement('dl')
+    list.className = 'shortcut-list'
+    for (const [keys, what] of group.rows) {
+      const dt = document.createElement('dt')
+      // Each key is its own element so the sheet can draw them as keycaps, which is what
+      // makes a shortcut list scannable rather than a paragraph of plus signs.
+      for (const part of keys.split(' / ')) {
+        const cap = document.createElement('kbd')
+        cap.textContent = part
+        dt.append(cap)
+      }
+      const dd = document.createElement('dd')
+      dd.textContent = what
+      list.append(dt, dd)
+    }
+    section.append(heading, list)
+    columns.append(section)
   }
-  card.append(list)
+  card.append(columns)
 
   const actions = document.createElement('div')
   actions.className = 'modal-actions'
@@ -2336,6 +2429,14 @@ function showShortcuts() {
   overlay.append(card)
   overlay.addEventListener('click', (event) => {
     if (event.target === overlay) overlay.remove()
+  })
+  // Escape closes it, like every other panel in the app.
+  overlay.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      overlay.remove()
+    }
   })
   document.body.append(overlay)
   close.focus()
@@ -3318,6 +3419,12 @@ el.previewToggle.addEventListener('click', () => setPreviewOpen(!state.previewOp
 el.previewClose.addEventListener('click', () => setPreviewOpen(false))
 el.previewPrev.addEventListener('click', () => stepPrev())
 el.previewNext.addEventListener('click', () => stepNext())
+// Quick Look's own arrows. They walk every file, not only media, so they use the Quick
+// Look stepper rather than the preview pane's media-only one.
+el.quicklookPrev.addEventListener('click', () => stepQuickLook(-1))
+el.quicklookNext.addEventListener('click', () => stepQuickLook(1))
+el.quicklookClose.addEventListener('click', () => closeQuickLook())
+el.quicklookBtn.addEventListener('click', () => openQuickLook())
 
 el.quicklook.addEventListener('click', (event) => {
   if (event.target === el.quicklook) closeQuickLook()
@@ -3378,6 +3485,15 @@ document.addEventListener('keydown', async (event) => {
   if (event.target === el.search) return
 
   const modifier = event.ctrlKey || event.metaKey
+
+  // The shortcut sheet, on a key that is easy to hit and easy to remember. It belongs
+  // here rather than buried in the Help menu alone: the owner did not know the app had a
+  // Quick Look view, which is a discoverability failure, not a missing feature.
+  if (modifier && (event.key === '/' || event.key === '?')) {
+    event.preventDefault()
+    showShortcuts()
+    return
+  }
 
   if (event.key === ' ') {
     event.preventDefault()
