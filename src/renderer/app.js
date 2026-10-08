@@ -332,36 +332,36 @@ async function runDrop({ op, paths, names, destination, label }) {
 const SVG = {
   folder:
     '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.6 4.2c0-.7.6-1.2 1.2-1.2h3l1.3 1.5h6.1c.7 0 1.2.6 1.2 1.2v6.1c0 .7-.6 1.2-1.2 1.2H2.8c-.7 0-1.2-.6-1.2-1.2V4.2Z" fill="currentColor" opacity=".92"/></svg>',
-  file: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.4 2.2h5.2L12.6 6v7.8H3.4V2.2Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8.4 2.4V6h3.9" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>',
-  home: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8 14 7v7.2H2V7l6-5.2Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M6.2 14.2V9.4h3.6v4.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
-  drive: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="4" width="12.4" height="8" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="11.6" cy="8" r="1.1" fill="currentColor"/></svg>',
+  file: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.4 2.2h5.2L12.6 6v7.8H3.4V2.2Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8.4 2.4V6h3.9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  home: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.8 14 7v7.2H2V7l6-5.2Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M6.2 14.2V9.4h3.6v4.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
+  drive: '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="4" width="12.4" height="8" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="11.6" cy="8" r="1.1" fill="currentColor"/></svg>',
   removable:
-    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="5.6" width="8" height="6.4" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6.4 5.4V2.6h3.2v2.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>',
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="5.6" width="8" height="6.4" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6.4 5.4V2.6h3.2v2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
   network:
-    '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="3.4" r="1.8" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="3.4" cy="12.4" r="1.8" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="12.6" cy="12.4" r="1.8" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M6.6 4.7 4.6 10.7M9.4 4.7l2 6M5.2 12.4h5.6" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>'
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="3.4" r="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="3.4" cy="12.4" r="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="12.6" cy="12.4" r="1.8" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M6.6 4.7 4.6 10.7M9.4 4.7l2 6M5.2 12.4h5.6" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>'
 }
 
 /** A distinct glyph per kind, so a glance tells you what a file is. */
 const KIND_SVG = {
   image:
-    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="5.6" cy="6.4" r="1.2" fill="currentColor"/><path d="M2.4 11.6 6 8.4l2.6 2.4 2.2-2 2.8 2.8" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>',
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="5.6" cy="6.4" r="1.2" fill="currentColor"/><path d="M2.4 11.6 6 8.4l2.6 2.4 2.2-2 2.8 2.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>',
   video:
-    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="3.4" width="9.4" height="9.2" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M11.4 7.4 14.4 5.6v4.8l-3-1.8Z" fill="currentColor"/></svg>',
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="3.4" width="9.4" height="9.2" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M11.4 7.4 14.4 5.6v4.8l-3-1.8Z" fill="currentColor"/></svg>',
   audio:
-    '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.4 3.2 12.4 2v8.4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><circle cx="4.8" cy="11.6" r="1.9" fill="currentColor"/><circle cx="10.8" cy="10.4" r="1.9" fill="currentColor"/></svg>',
-  pdf: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.4 2.2h5.2L12.6 6v7.8H3.4V2.2Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8.4 2.4V6h3.9" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5.2 10.6h5.4M5.2 12.4h3.6" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>',
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.4 3.2 12.4 2v8.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="4.8" cy="11.6" r="1.9" fill="currentColor"/><circle cx="10.8" cy="10.4" r="1.9" fill="currentColor"/></svg>',
+  pdf: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.4 2.2h5.2L12.6 6v7.8H3.4V2.2Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8.4 2.4V6h3.9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.2 10.6h5.4M5.2 12.4h3.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
   code: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.4 2.6 8 6 12.6M10 3.4 13.4 8 10 12.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   archive:
-    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.4" y="2.4" width="11.2" height="11.2" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M7 2.4h2v3H7zM7 6.4h2v3H7z" fill="currentColor"/></svg>',
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2.4" y="2.4" width="11.2" height="11.2" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M7 2.4h2v3H7zM7 6.4h2v3H7z" fill="currentColor"/></svg>',
   spreadsheet:
-    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="3" width="12.4" height="10" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M1.8 6.6h12.4M6.6 3v10M1.8 10h12.4" stroke="currentColor" stroke-width="1.1"/></svg>',
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="3" width="12.4" height="10" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M1.8 6.6h12.4M6.6 3v10M1.8 10h12.4" stroke="currentColor" stroke-width="1.4"/></svg>',
   presentation:
-    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="2.6" width="12.4" height="8.4" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M8 11v2.4M5.6 14h4.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>',
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="2.6" width="12.4" height="8.4" rx="1.3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 11v2.4M5.6 14h4.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
   document:
-    '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.4 2.2h5.2L12.6 6v7.8H3.4V2.2Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8.4 2.4V6h3.9" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5.4 9h5.2M5.4 11h5.2" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>',
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.4 2.2h5.2L12.6 6v7.8H3.4V2.2Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8.4 2.4V6h3.9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.4 9h5.2M5.4 11h5.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
   executable:
-    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="3" width="12.4" height="10" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M4.4 6.4 6.6 8l-2.2 1.6M8 10.4h3.4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  text: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.4 2.2h5.2L12.6 6v7.8H3.4V2.2Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M8.4 2.4V6h3.9" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M5.4 9.2h5.2M5.4 11.2h3.4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>'
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="3" width="12.4" height="10" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M4.4 6.4 6.6 8l-2.2 1.6M8 10.4h3.4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  text: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.4 2.2h5.2L12.6 6v7.8H3.4V2.2Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8.4 2.4V6h3.9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M5.4 9.2h5.2M5.4 11.2h3.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>'
 }
 
 function iconFor(item) {
@@ -773,8 +773,10 @@ function renderSearchResults() {
 
   const header = document.createElement('div')
   header.className = 'list-header'
+  // The leading empty cell is the icon gutter, matching the row grid. Without it "Name"
+  // sat left of the names it labels.
   header.innerHTML =
-    '<span class="col-name">Name</span><span class="col-kind">Matched</span><span class="col-size">Size</span><span class="col-date">Date Modified</span>'
+    '<span class="col-icon" aria-hidden="true"></span><span class="col-name">Name</span><span class="col-kind">Matched</span><span class="col-size">Size</span><span class="col-date">Date Modified</span>'
   el.content.append(header)
 
   for (const item of state.searchResults) {
@@ -1026,6 +1028,13 @@ function renderList() {
 
   const header = document.createElement('div')
   header.className = 'list-header'
+  // The leading empty cell is the icon gutter, matching the row grid. Without it the four
+  // sort buttons were laid into cells 1-4 of a five-column grid, so "Name" sat in the icon
+  // gutter and every header label stood one column to the left of its own data.
+  const gutter = document.createElement('span')
+  gutter.className = 'col-icon'
+  gutter.setAttribute('aria-hidden', 'true')
+  header.append(gutter)
   // Each header sorts by its own column. The active one carries the arrow, so the header
   // row states the order instead of the user having to open a menu to find out.
   const cols = [

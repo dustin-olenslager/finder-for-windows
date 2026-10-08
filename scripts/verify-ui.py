@@ -1602,6 +1602,126 @@ with sync_playwright() as p:
     check("Escape cancels the delete", pg.evaluate("() => !document.querySelector('.modal')"))
     check("cancelling deletes nothing", pg.evaluate("() => (window.__trashed || []).length === 0"))
 
+    # ---- P2 visual correctness: measured, because a look would not have caught these ----
+    # The list header's labels were laid into cells 1-4 of a five-column grid, so "Name"
+    # sat in the icon gutter and every header label stood one column left of its data.
+    pg.keyboard.press("Control+2")
+    pg.wait_for_timeout(700)
+    header_align = pg.evaluate("""() => {
+        const head = document.querySelector('.list-header .col-name');
+        const rowName = document.querySelector('.content-list .row .name');
+        if (!head || !rowName) return null;
+        const cells = [...document.querySelector('.list-header').children];
+        return {
+            headerLeft: Math.round(head.getBoundingClientRect().left),
+            rowLeft: Math.round(rowName.getBoundingClientRect().left),
+            cells: cells.length,
+            gutter: cells[0].className,
+            sizeAlign: getComputedStyle(document.querySelector('.content-list .col-size')).textAlign,
+            dateAlign: getComputedStyle(document.querySelector('.content-list .col-date')).textAlign
+        };
+    }""")
+    check("the list header has an icon gutter to match the rows",
+          bool(header_align) and header_align["cells"] == 5 and "col-icon" in header_align["gutter"], str(header_align))
+    check("the Name header sits over the names it labels",
+          bool(header_align) and header_align["headerLeft"] == header_align["rowLeft"], str(header_align))
+    check("the size column is right-aligned so digits line up",
+          bool(header_align) and header_align["sizeAlign"] == "right", str(header_align))
+    check("the date column is right-aligned so digits line up",
+          bool(header_align) and header_align["dateAlign"] == "right", str(header_align))
+
+    # The five tokens that were referenced but never defined, so ten `var(..., fallback)`
+    # sites rendered a fallback chosen for a dark background. In light mode tag hover came
+    # out at 1.00:1 — an invisible hover state.
+    tokens = pg.evaluate("""() => {
+        const cs = getComputedStyle(document.documentElement);
+        const out = {};
+        for (const t of ['--accent-soft', '--bg-soft', '--hover', '--line-soft', '--fg-dim', '--fg-disabled']) {
+            out[t] = cs.getPropertyValue(t).trim();
+        }
+        return out;
+    }""")
+    for tok in ["--accent-soft", "--bg-soft", "--hover", "--line-soft", "--fg-dim", "--fg-disabled"]:
+        check(f"{tok} is defined rather than falling back", bool(tokens[tok]), str(tokens))
+
+    # Contrast, computed from the RENDERED colors over the composited backdrop. The first
+    # probe of this got the maths wrong (it fed 0-255 values to a formula expecting 0-1)
+    # and reported a black-on-white label as 174:1, so the check asserts a plausible range
+    # as well as a passing ratio — a number above 21:1 is a broken probe, not a pass.
+    contrast = pg.evaluate("""() => {
+        const lin = (c) => { c = c / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+        const parse = (s) => {
+            const m = String(s).match(/rgba?\\(([^)]+)\\)/);
+            if (!m) return null;
+            const p = m[1].split(/[,\\s/]+/).filter(Boolean).map(Number);
+            return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+        };
+        const clamp = (v) => Math.max(0, Math.min(255, v));
+        const over = (f, b) => {
+            const a = f.a + b.a * (1 - f.a);
+            if (a === 0) return { r: 255, g: 255, b: 255, a: 1 };
+            return { r: clamp((f.r*f.a + b.r*b.a*(1-f.a))/a), g: clamp((f.g*f.a + b.g*b.a*(1-f.a))/a),
+                     b: clamp((f.b*f.a + b.b*b.a*(1-f.a))/a), a: 1 };
+        };
+        const lum = (c) => 0.2126*lin(c.r) + 0.7152*lin(c.g) + 0.0722*lin(c.b);
+        const ratio = (a, b) => (Math.max(lum(a), lum(b)) + 0.05) / (Math.min(lum(a), lum(b)) + 0.05);
+        const backdrop = (node) => {
+            const stack = []; let n = node;
+            while (n && n !== document.documentElement) { stack.unshift(n); n = n.parentElement; }
+            stack.unshift(document.documentElement);
+            let acc = { r: 255, g: 255, b: 255, a: 1 };
+            for (const el of stack) { const c = parse(getComputedStyle(el).backgroundColor); if (c && c.a > 0) acc = over(c, acc); }
+            return acc;
+        };
+        const one = (sel, pseudo) => {
+            const n = document.querySelector(sel);
+            if (!n) return null;
+            const cs = pseudo ? getComputedStyle(n, pseudo) : getComputedStyle(n);
+            const fg = parse(cs.color); const bg = backdrop(n);
+            const op = parseFloat(cs.opacity);
+            const eff = op < 1 ? over({ ...fg, a: fg.a * op }, bg) : over(fg, bg);
+            return Math.round(ratio(eff, bg) * 100) / 100;
+        };
+        return {
+            status: one('#statusCount'),
+            placeholder: one('#search', '::placeholder'),
+            rowMeta: one('.content-list .col-size'),
+            previewMeta: one('#previewMeta'),
+            disabled: one('#back')
+        };
+    }""")
+    for name, r in contrast.items():
+        check(f"contrast {name} passes and is a plausible number", r is not None and 3 <= r <= 21, str(r))
+    check("muted text clears AA on the tinted search field", contrast["placeholder"] >= 4.5, str(contrast))
+    check("disabled controls are legible, not invisible", contrast["disabled"] >= 3, str(contrast))
+
+    # One stroke width per size. Four values at a single 16px size is what made the icon set
+    # read as borrowed rather than drawn.
+    strokes = pg.evaluate("""() => {
+        const all = [...document.querySelectorAll('svg')].flatMap((s) => [...s.querySelectorAll('[stroke-width]')]);
+        return [...new Set(all.map((n) => n.getAttribute('stroke-width')))].sort();
+    }""")
+    check("the row icon set uses one stroke width", len(strokes) == 1, str(strokes))
+
+    # An empty folder is a state, not a caption in the corner.
+    pg.evaluate("""() => {
+        const pane = document.createElement('div');
+        pane.className = 'column';
+        const h = document.createElement('p');
+        h.className = 'hint';
+        h.textContent = 'Empty';
+        pane.append(h);
+        document.getElementById('content').append(pane);
+    }""")
+    empty_state = pg.evaluate("""() => {
+        const h = [...document.querySelectorAll('.column > .hint')].pop();
+        if (!h) return null;
+        const cs = getComputedStyle(h);
+        return { display: cs.display, justify: cs.justifyContent, minHeight: cs.minHeight };
+    }""")
+    check("the empty state is centred rather than pinned to a corner",
+          bool(empty_state) and empty_state["display"] == "flex" and empty_state["justify"] == "center", str(empty_state))
+
     # Recomputed at the very end, after everything above has moved the UI around.
     leaked = hidden_but_visible()
     check("no element marked hidden is actually visible", leaked == [], str(leaked))

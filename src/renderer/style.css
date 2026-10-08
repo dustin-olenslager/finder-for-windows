@@ -16,14 +16,32 @@
   --bg-selected: #0a68d8;
   --bg-selected-dim: rgba(10, 104, 216, 0.16);
   --fg: #1d1d1f;
-  /* Darkened from #7a7a7f, which measured 4.28:1 on white and failed WCAG AA (4.5:1) for
+  /* Darkened from #7a7a7f, which measured 4.27:1 on white and failed WCAG AA (4.5:1) for
      body text. This single token paints the hints, the metadata, the status bar and the
-     filter labels, so one wrong value failed ten surfaces at once. #6e6e73 measures
-     5.07:1 on white and 4.74:1 on the sidebar tint, and is gated by a test. */
-  --fg-muted: #6e6e73;
+     filter labels, so one wrong value failed ten surfaces at once.
+     Tuned against the WORST surface it lands on rather than against white: the search
+     field is rgba(0,0,0,0.043) over the toolbar tint, which composites to #f0f0f2, and
+     the placeholder sits on that. #6e6e73 measured 4.45:1 there — a fail by 0.05, and a
+     real one, because that is the value a person reads. #6d6d72 is the lightest value
+     that clears 4.5:1 on the search field (4.52) while staying 5.15:1 on white. */
+  --fg-muted: #6d6d72;
   --fg-selected: #ffffff;
   --line: rgba(0, 0, 0, 0.1);
   --accent: #0a68d8;
+  /* These five were referenced through `var(--x, fallback)` in ten places but never
+     defined, so every one of those sites rendered its fallback instead — and the
+     fallbacks were chosen for a dark background. In light mode tag hover came out at
+     1.00:1, i.e. the hover state was invisible. Defined once, here, derived from the
+     same ramp as the rest of the palette. */
+  --accent-soft: rgba(10, 104, 216, 0.12);
+  --bg-soft: rgba(0, 0, 0, 0.04);
+  --hover: rgba(0, 0, 0, 0.055);
+  --line-soft: rgba(0, 0, 0, 0.06);
+  --fg-dim: #6e6e73;
+  /* A real disabled colour rather than `opacity: .45`, which measured 2.01:1 — below the
+     3:1 floor for a control that must still be legible. 3.95:1 on white, and it still
+     reads as disabled because it is far lighter than --fg (16.8:1). */
+  --fg-disabled: #808080;
   --warn: #b26a00;
   --error: #b3261e;
   --radius: 7px;
@@ -43,6 +61,12 @@
     --fg-muted: #98989d;
     --line: rgba(255, 255, 255, 0.12);
     --accent: #4c9aff;
+    --accent-soft: rgba(76, 154, 255, 0.16);
+    --bg-soft: rgba(255, 255, 255, 0.05);
+    --hover: rgba(255, 255, 255, 0.07);
+    --line-soft: rgba(255, 255, 255, 0.08);
+    --fg-dim: #98989d;
+    --fg-disabled: #808080;
     --warn: #e0a458;
     --error: #ff6b60;
   }
@@ -183,7 +207,7 @@ body {
 
 .icon-btn:hover:not(:disabled) { background: var(--bg-hover); }
 .icon-btn:active:not(:disabled) { background: var(--line); }
-.icon-btn:disabled { color: var(--fg-muted); opacity: 0.45; }
+.icon-btn:disabled { color: var(--fg-disabled); opacity: 1; }
 
 /* A toggle that is ON must look on: the preview pane is only discoverable if the
    control that governs it shows its own state. */
@@ -554,6 +578,11 @@ body {
 
 /* Search results: name over its folder, so a result says where it lives. */
 .row-result { display: grid; grid-template-columns: 22px 1fr 88px 84px 140px; align-items: center; }
+
+/* The search-results header shares `.list-header`, but the result grid is a different shape
+   (22px gutter, "Matched" instead of "Kind"). It therefore needs its own columns, or the
+   header labels do not line up with the rows beneath them. */
+.content-results .list-header { grid-template-columns: 22px 1fr 88px 84px 140px; }
 .row-result .col-name { display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
 .row-where { font-size: 11px; color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-result.is-selected .row-where { color: rgba(255, 255, 255, 0.85); }
@@ -779,6 +808,15 @@ body {
 
 .content-list { padding: 0; }
 
+/* Numbers line up only when they share an edge. Tabular figures were already set, but
+   left-aligning the columns wasted them: 9 KB and 120 KB did not align on the digits. */
+.list-header .col-size,
+.list-header .col-date,
+.content-list .col-size,
+.content-list .col-date {
+  text-align: right;
+}
+
 .list-header,
 .content-list .row {
   display: grid;
@@ -794,7 +832,10 @@ body {
   position: sticky;
   top: 0;
   height: 24px;
-  grid-template-columns: 1fr 130px 84px 150px;
+  /* The leading 16px is the icon gutter that every row has and the header did not, which
+     put "Name" 24px to the LEFT of the names it labels (measured). The header's first
+     cell now starts exactly where the row's name text does. */
+  grid-template-columns: 16px 1fr 130px 84px 150px;
   background: var(--bg-toolbar);
   border-bottom: 1px solid var(--line);
   color: var(--fg-muted);
@@ -890,6 +931,19 @@ body {
 .hint,
 .error {
   margin: 14px 16px;
+  color: var(--fg-muted);
+}
+
+/* An empty folder is a STATE, not a stray line of text: a caption pinned to the top-left
+   of a large empty pane reads as a rendering failure. Centred in the pane it reads as an
+   answer. Only the empty-state hint in a column, not the inline hints elsewhere. */
+.column > .hint {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  text-align: center;
   color: var(--fg-muted);
 }
 
