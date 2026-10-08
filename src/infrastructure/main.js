@@ -8,7 +8,7 @@
  * it may import Electron, Node's fs, or any vendor module.
  */
 
-const { app, BrowserWindow, ipcMain, shell, clipboard, screen } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, clipboard, screen, dialog } = require('electron')
 const { execFile } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -318,6 +318,20 @@ app.whenReady().then(async () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
 })
+// Anything that throws while starting up is otherwise SILENT: the installer reports only that
+// Finish failed, and the user is left with an empty screen and no reason. This surfaced as
+// "Windows is searching for Finder for Windows.exe" on a perfectly good install — the failure
+// that mattered was nowhere in the app, and finding it took reading electron-builder's NSIS
+// templates. So a startup fault now names itself, on screen and on stderr.
+  .catch((error) => {
+    const detail = error && error.stack ? error.stack : String(error)
+    process.stderr.write(`Finder for Windows failed to start:\n${detail}\n`)
+    dialog.showErrorBox(
+      'Finder for Windows could not start',
+      `${(error && error.message) || error}\n\n${detail}`
+    )
+    app.exit(1)
+  })
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
