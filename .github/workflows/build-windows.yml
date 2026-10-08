@@ -55,6 +55,47 @@ jobs:
           # Belt and braces against electron-builder trying to publish a release.
           GH_TOKEN: ''
 
+      # The one check that proves the installer is not silently broken.
+      #
+      # electron-builder 26.15.3 packed the app .7z with a 7za that applies a CPU-specific
+      # branch filter to executable content: BCJ2 on x64, ARM64 on arm64. The install-time
+      # Nsis7z decoder can read BCJ2 but NOT ARM64, so on arm64 it wrote the data files and
+      # silently skipped EVERY .exe and .dll — installer exits 0, no warning, and the app is
+      # unrunnable (electron-builder#9983, fixed in 26.15.6). A green build proves nothing
+      # here, which is why this inspects the artifact instead of trusting the exit code.
+      - name: Verify the installer actually contains its executables
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $sevenZip = 'C:\Program Files\7-Zip\7z.exe'
+          if (!(Test-Path $sevenZip)) { throw "7-Zip not found at $sevenZip" }
+
+          $installer = Get-ChildItem dist/*Setup*.exe | Select-Object -First 1
+          if (!$installer) { throw "no installer was produced" }
+          Write-Host "Inspecting $($installer.Name)"
+
+          $payload = Join-Path $env:RUNNER_TEMP 'apppayload'
+          New-Item -ItemType Directory -Force -Path $payload | Out-Null
+          # Single quotes: $PLUGINSDIR must reach 7-Zip literally, not expand as a variable.
+          & $sevenZip e $installer.FullName '$PLUGINSDIR/app-*.7z' "-o$payload" -y | Out-Null
+
+          $app = Get-ChildItem (Join-Path $payload '*.7z') | Select-Object -First 1
+          if (!$app) { throw "the installer carries no embedded app archive" }
+
+          $listing = & $sevenZip l -slt $app.FullName
+
+          $bad = $listing | Select-String -Pattern 'Method = .*(ARM|BCJ2)'
+          if ($bad) {
+            Write-Host "::error::The app archive uses a branch filter the install-time decoder cannot read, so every .exe and .dll would be silently skipped at install time (electron-builder#9983). Fix: electron-builder >= 26.15.6."
+            $bad | ForEach-Object { Write-Host $_ }
+            exit 1
+          }
+
+          $pe = $listing | Select-String -Pattern 'Path = .*\.(exe|dll)$'
+          if (!$pe) { throw "no executables found in the app archive — nothing to install" }
+          Write-Host "OK: $($pe.Count) executables/DLLs, none using an undecodable filter."
+          $pe | ForEach-Object { Write-Host "  $_" }
+
       - name: List what was produced
         shell: pwsh
         run: Get-ChildItem -Recurse dist | Select-Object FullName, Length | Format-Table -AutoSize
