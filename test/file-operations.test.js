@@ -75,6 +75,31 @@ test('suggestUniqueName avoids the names already present, case-insensitively', (
   assert.equal(suggestUniqueName('New Folder', ['New Folder', 'New Folder 2']), 'New Folder 3')
 })
 
+test('suggestUniqueName numbers BEFORE the extension, so the file stays that type', () => {
+  // "Take 1.mp4 2" is not a video — its extension has become ".mp4 2". Every other file
+  // manager produces "Take 1 2.mp4" and so does this one.
+  assert.equal(suggestUniqueName('Take 1.mp4', ['Take 1.mp4']), 'Take 1 2.mp4')
+  assert.equal(suggestUniqueName('clip.mov', ['clip.mov', 'clip 2.mov']), 'clip 3.mov')
+})
+
+test('suggestUniqueName keeps only the last extension', () => {
+  assert.equal(suggestUniqueName('archive.tar.gz', ['archive.tar.gz']), 'archive.tar 2.gz')
+})
+
+test('suggestUniqueName treats a leading dot as part of the name, not an extension', () => {
+  // A dotfile has no extension: ".gitignore 2" is right, and "2.gitignore" would turn a
+  // dotfile into a visible file with the extension "gitignore".
+  assert.equal(suggestUniqueName('.gitignore', ['.gitignore']), '.gitignore 2')
+})
+
+test('suggestUniqueName handles a trailing dot as no extension', () => {
+  assert.equal(suggestUniqueName('weird.', ['weird.']), 'weird. 2')
+})
+
+test('suggestUniqueName is case-insensitive about what is taken', () => {
+  assert.equal(suggestUniqueName('TAKE 1.MP4', ['take 1.mp4']), 'TAKE 1 2.MP4')
+})
+
 // ---------------------------------------------------------------------------
 // performFileOperation
 // ---------------------------------------------------------------------------

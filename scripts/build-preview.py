@@ -119,6 +119,10 @@ const PREVIEWS = __PREVIEWS__;
 const SEARCH_RECORDS = __SEARCH_RECORDS__;
 const INDEX_STATUS = __INDEX_STATUS__;
 const SEP = (p) => (p.includes('\\\\') ? '\\\\' : '/');
+// One 1x1 PNG, used as the stand-in for a real shell icon.
+const HARNESS_ICON =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
+
 window.finder = {
   async listDirectory(path) {
     const items = TREE[path];
@@ -209,8 +213,27 @@ window.finder = {
   // Mirrors the real trash rule closely enough to assert against: a mapped network drive
   // has no Recycle Bin, so it is refused and nothing is deleted. A refusal that reads like
   // a failure would make the user think the file went anyway, so the message says so.
+  /**
+   * Real file-type icons. The harness answers for ONE extension (a 1x1 PNG) and returns
+   * null for everything else, so a test can prove the swap happens for a type the shell
+   * knows and that the built-in glyph survives for one it does not.
+   */
+  fileIcon: (target, isDirectory) => {
+    window.__iconAsked = (window.__iconAsked || []).concat([String(target)]);
+    const name = String(target || '').toLowerCase();
+    if (isDirectory) return Promise.resolve({ ok: true, icon: HARNESS_ICON });
+    if (name.endsWith('.mp4')) return Promise.resolve({ ok: true, icon: HARNESS_ICON });
+    return Promise.resolve({ ok: true, icon: null });
+  },
+
   async fileOperation(request) {
     const op = request && request.op;
+    // "exists" drives the conflict question. The harness answers from a settable set so a
+    // test can put a name in the destination and see the dialog appear.
+    if (op === 'exists') {
+      const target = String((request && request.path) || '').toLowerCase();
+      return { ok: true, exists: (window.__existing || []).map((p) => String(p).toLowerCase()).includes(target) };
+    }
     if (op !== 'trash') return { ok: true };
     const target = String((request && request.path) || '');
     const networkRoots = ['Z:\\\\', 'Y:\\\\'];
@@ -324,6 +347,22 @@ window.finder = {
     window.__fireFoldersChanged = callback;
     return () => { window.__fireFoldersChanged = null; };
   },
+  // Reads the app's state, so a check can assert what the UI actually believes rather than
+  // what its markup happens to say.
+  __state: () => state,
+  // Drives the real paste path, including the conflict question, without needing a
+  // context menu built first.
+  __pasteInto: (destination) => pasteInto(destination),
+  // Forgets every icon the shell has answered for, so a check can measure the per-type
+  // request count instead of reading a cache warmed by earlier checks in the same run.
+  __clearIconCache: () => {
+    iconCache.clear();
+    window.__iconAsked = [];
+    return true;
+  },
+  __forceIconLoad: () => loadIconsFor(
+    state.columns.length ? presentItems(state.columns[state.columns.length - 1].items) : []
+  ),
   // A tag store that actually holds tags, so the UI can be exercised: an empty store
   // would make every tag check pass vacuously.
   async listTags() { return window.__tags || {}; },

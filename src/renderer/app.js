@@ -93,6 +93,12 @@ const state = {
   tags: {}, // every tag and its files
   // The in-app file clipboard: { op: 'copy'|'move', items: [{name, path}] }.
   clipboard: null,
+  // The answer given to "these already exist", remembered for the session. Cleared when
+  // the user asks for the dialog back from the View menu.
+  conflictChoice: null,
+  // Hidden files are off by default, as they are in Explorer: the attribute exists to keep
+  // things out of the way, so a file manager that always showed them would ignore it.
+  showHidden: false,
   activeSidebar: null,
   // ON by default. A preview nobody can find is not a feature: the first version only
   // opened it on a shortcut, so the owner saw no previews at all.
@@ -369,6 +375,85 @@ function iconFor(item) {
   return KIND_SVG[item.kind] || SVG.file
 }
 
+/**
+ * Real file-type icons, from the operating system.
+ *
+ * Drawn in two passes on purpose. The listing paints immediately with the built-in vector
+ * glyph, then this asks the shell for the true icon and swaps it in when it arrives. That
+ * ordering is the whole design: `app.getFileIcon` is an async round trip, and making the
+ * first paint wait for it would trade a fast folder for a pretty one. If the shell never
+ * answers, the vector glyph stays and nothing is missing.
+ *
+ * Keyed by EXTENSION on this side too, and one lookup is shared between every element of
+ * the same type, so a folder of 5,000 videos makes one call and does one re-render. A
+ * dotfile like `.gitignore` and a bare `README` both go in the no-extension bucket, which
+ * the shell resolves to the generic file icon.
+ */
+const iconCache = new Map()
+
+/**
+ * Fetch the icons for the types on screen, then repaint ONCE.
+ *
+ * The single repaint matters as much as the caching: swapping each glyph as its own
+ * promise resolved would re-render the list once per file type and lose the user's scroll
+ * position each time.
+ */
+let iconRequestToken = 0
+async function loadIconsFor(items) {
+  if (!window.finder?.fileIcon) return
+
+  const wanted = new Map()
+  for (const item of items) {
+    const key = item.isDirectory ? '#folder' : (() => {
+      const dot = item.name.lastIndexOf('.')
+      return dot > 0 ? item.name.slice(dot).toLowerCase() : '#none'
+    })()
+    if (!iconCache.has(key) && !wanted.has(key)) wanted.set(key, item)
+  }
+  if (wanted.size === 0) return
+
+  const token = ++iconRequestToken
+  const answers = await Promise.allSettled(
+    [...wanted.entries()].map(async ([key, item]) => {
+      const path = item.path || (await window.finder.joinPath(activePath(), item.name))
+      const result = await window.finder.fileIcon(path, Boolean(item.isDirectory))
+      return [key, result?.icon || null]
+    })
+  )
+
+  let gained = false
+  for (const answer of answers) {
+    if (answer.status !== 'fulfilled') continue
+    const [key, icon] = answer.value
+    // Cache the miss too, so a type the shell has no icon for is asked about once, not on
+    // every re-render.
+    iconCache.set(key, icon)
+    if (icon) gained = true
+  }
+
+  // A stale answer must not repaint a folder the user has already left.
+  if (token !== iconRequestToken || !gained) return
+  paintIcons()
+}
+
+/** Swap each rendered glyph for its real icon, in place. Cheaper and calmer than a
+ *  full re-render: no scroll jump, no selection loss. */
+function paintIcons() {
+  for (const row of el.content.querySelectorAll('.row, .icon-cell')) {
+    const name = row.dataset.name
+    if (!name) continue
+    // `.glyph` in the list and column views, `.icon-art` in the icon view — the two
+    // holders are named differently, and a wrong selector here would silently do nothing.
+    const holder = row.querySelector('.glyph, .icon-art')
+    if (!holder) continue
+    const dot = name.lastIndexOf('.')
+    const key = row.dataset.dir === '1' ? '#folder' : (dot > 0 ? name.slice(dot).toLowerCase() : '#none')
+    const icon = iconCache.get(key)
+    if (!icon) continue
+    holder.innerHTML = `<img class="file-icon" src="${icon}" alt="" draggable="false">`
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Formatting
 // ---------------------------------------------------------------------------
@@ -543,8 +628,25 @@ function applySort(items) {
 }
 
 /** The one place a folder's items are filtered and sorted for display. */
+/**
+ * The items a view should show: the filter, the pattern, and now hidden files.
+ *
+ * `isHidden` has been computed by the reader for every item since the beginning — the
+ * attribute bits come back with the bulk enumeration whether or not anyone looks — and
+ * nothing read it. A hidden file that is never shown is the same as one that does not
+ * exist, so the switcher is the last piece.
+ *
+ * Folders are exempt from the hidden filter, exactly as Explorer and Finder treat them:
+ * hiding the folder the user is standing in is how a file manager loses them. (The filter
+ * and pattern rules already keep folders visible for the same reason.)
+ */
+function visibleByHidden(items) {
+  if (state.showHidden) return items
+  return items.filter((item) => !item.isHidden)
+}
+
 function presentItems(items) {
-  return applySort(applyFilter(items))
+  return applySort(applyFilter(visibleByHidden(items)))
 }
 
 // ---------------------------------------------------------------------------
@@ -611,6 +713,11 @@ function render() {
   renderPatternBar()
   renderClipboardState()
   syncWatchers()
+  // Not awaited: the listing is already on screen with its vector glyphs, and the real
+  // icons arrive when the shell answers.
+  loadIconsFor(state.columns.length ? presentItems(state.columns[state.columns.length - 1].items) : []).catch(
+    () => {}
+  )
 }
 
 function renderNavButtons() {
@@ -2053,6 +2160,70 @@ function confirmDialog({ title, body, confirmLabel }) {
 }
 
 /**
+ * Ask what to do about names that already exist, and get one of three answers.
+ *
+ * Asked BEFORE the transfer runs, not after it fails. The alternative — try it, then
+ * report "3 items already exist" and make the user choose and retry — costs them the whole
+ * operation to learn something the app could have asked up front.
+ *
+ * There is no "Replace" button. Overwriting is the one action in this app that destroys
+ * data, and every other destructive path here asks first; offering it in a dialog the user
+ * reaches by pasting would make it the fastest way to lose a file. That option needs the
+ * owner's decision.
+ */
+function askConflictChoice(conflicts) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div')
+    overlay.className = 'modal'
+    const many = conflicts.length > 1
+    overlay.innerHTML = `
+      <form class="modal-card" role="dialog" aria-modal="true">
+        <h2 class="modal-title">These already exist</h2>
+        <p class="modal-body"></p>
+        <div class="modal-actions modal-actions-stack">
+          <button type="button" class="btn-primary" data-choice="skip"></button>
+          <button type="button" class="btn-secondary" data-choice="keep-both"></button>
+          <button type="button" class="btn-secondary" data-choice="cancel">Cancel</button>
+        </div>
+      </form>`
+
+    overlay.querySelector('.modal-body').textContent = many
+      ? `${conflicts.length} items are already in the destination folder. What should happen to them?`
+      : `“${conflicts[0]}” is already in the destination folder. What should happen to it?`
+    const skip = overlay.querySelector('[data-choice="skip"]')
+    const keep = overlay.querySelector('[data-choice="keep-both"]')
+    skip.textContent = many ? 'Skip them' : 'Skip it'
+    keep.textContent = many ? 'Keep both' : 'Keep both'
+
+    const close = (result) => {
+      overlay.remove()
+      document.removeEventListener('keydown', onKey, true)
+      resolve(result)
+    }
+
+    function onKey(event) {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        close(null)
+      }
+    }
+
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) close(null)
+    })
+    for (const button of overlay.querySelectorAll('[data-choice]')) {
+      button.addEventListener('click', () => close(button.dataset.choice))
+    }
+    overlay.querySelector('form').addEventListener('submit', (event) => event.preventDefault())
+
+    document.addEventListener('keydown', onKey, true)
+    document.body.append(overlay)
+    // Focus lands on Skip: the answer that changes nothing is the safe default.
+    skip.focus()
+  })
+}
+
+/**
  * Run an operation, and if the name is refused, re-ask with the reason shown. A
  * rejected name is a normal thing to correct, not a dead end.
  */
@@ -2387,6 +2558,14 @@ const MENUS = {
       { separator: true },
       { label: 'Show Preview', accel: 'Ctrl+I', run: () => setPreviewOpen(!state.previewOpen) },
       { label: 'Quick Look', accel: 'Space', run: openQuickLook },
+      {
+        // A checkmark rather than a verb, so the entry states the current setting as well
+        // as offering to change it — the user should not have to toggle it to find out.
+        // A FUNCTION, because this menu is built once and a fixed string would freeze.
+        label: () => (state.showHidden ? '✓ Show Hidden Files' : 'Show Hidden Files'),
+        accel: 'Ctrl+Shift+H',
+        run: () => toggleHidden()
+      },
       { separator: true },
       { label: 'Keyboard Shortcuts', accel: 'Ctrl+/', run: showShortcuts },
       { separator: true },
@@ -2454,7 +2633,10 @@ function toggleMenu(name, anchor) {
     button.className = 'menu-entry'
 
     const label = document.createElement('span')
-    label.textContent = entry.label
+    // A label may be a function, resolved at OPEN time. `MENUS` is a module constant, so a
+    // plain string that depends on state is frozen at load: the "Show Hidden Files" check
+    // mark could never appear, because it was computed once before the user could toggle it.
+    label.textContent = typeof entry.label === 'function' ? entry.label() : entry.label
     button.append(label)
 
     if (entry.accel) {
@@ -3108,6 +3290,81 @@ function cutSelection() {
  * paste" is the whole gesture, and pasting into the folder you are looking at is what
  * every file manager does.
  */
+/**
+ * The type-ahead buffer.
+ *
+ * Time-limited to just under a second, because the alternatives are both wrong: a buffer
+ * that never expires turns every stray keystroke into a search for a 12-letter word, and
+ * one that expires instantly can never match more than one letter.
+ */
+let typeAhead = { prefix: '', at: 0 }
+
+/** Turn hidden files on or off, from the menu or the keyboard, saying which it now is. */
+function toggleHidden() {
+  state.showHidden = !state.showHidden
+  render()
+  showToast(state.showHidden ? 'Showing hidden files.' : 'Hiding hidden files.')
+}
+
+/** Jump the selection to the first item beginning with what has been typed. */
+function jumpToTyped(character) {
+  const column = activeColumn()
+  if (!column) return false
+  const items = presentItems(column.items)
+  if (items.length === 0) return false
+
+  const now = Date.now()
+  const continuing = now - typeAhead.at < 900
+  typeAhead.prefix = continuing ? typeAhead.prefix + character : character
+  typeAhead.at = now
+
+  const prefix = typeAhead.prefix.toLowerCase()
+  const names = items.map((item) => item.name.toLowerCase())
+
+  // Typing the same letter repeatedly ("ccc") cycles through the items starting with it,
+  // which is what Explorer does and what people expect from a file list.
+  const isRepeated = prefix.length > 1 && prefix.split('').every((c) => c === prefix[0])
+  let match
+  if (isRepeated) {
+    const letter = prefix[0]
+    const matches = names.map((n, i) => (n.startsWith(letter) ? i : -1)).filter((i) => i >= 0)
+    if (matches.length === 0) return false
+    const currentIndex = items.findIndex((i) => i.name === state.selected?.name)
+    match = matches.find((i) => i > currentIndex) ?? matches[0]
+  } else {
+    // Starting from the selection, so typing a letter repeatedly walks down the matches.
+    const from = items.findIndex((i) => i.name === state.selected?.name)
+    match = names.findIndex((n, i) => n.startsWith(prefix) && i > from)
+    if (match === -1) match = names.findIndex((n) => n.startsWith(prefix))
+  }
+
+  if (match === -1) return false
+  const index = state.columns.indexOf(column)
+  selectInColumn(index === -1 ? state.columns.length - 1 : index, items[match].name)
+  requestAnimationFrame(() => {
+    el.content.querySelector('.row.is-selected')?.scrollIntoView({ block: 'nearest' })
+  })
+  return true
+}
+
+/**
+ * Which of these items already exist in the destination.
+ *
+ * Asked one by one through the existing `exists` check rather than by listing the
+ * destination: the batch is what the user selected, and it is usually a handful of items,
+ * so this costs a few cheap calls instead of reading a folder that may hold 50,000 files
+ * just to answer a yes/no.
+ */
+async function collidingNames(items, destination) {
+  const found = []
+  for (const item of items) {
+    const path = item.path || (await window.finder.joinPath(destination, item.name))
+    const result = await window.finder.fileOperation({ op: 'exists', path })
+    if (result?.exists) found.push(item.name)
+  }
+  return found
+}
+
 async function pasteInto(destination = activePath()) {
   if (!clipboardHasItems()) {
     showToast('Nothing has been copied yet.')
@@ -3119,7 +3376,23 @@ async function pasteInto(destination = activePath()) {
   }
 
   const { op, items } = state.clipboard
-  const result = await window.finder.transfer({ op, items, destination })
+  const transferRequest = { op, items, destination, onConflict: state.conflictChoice }
+
+  // Ask up front, but only when it will matter: if nothing in the batch collides, the
+  // question never appears and the paste is a single uninterrupted action.
+  const collisions = await collidingNames(items, destination)
+  if (collisions.length > 0 && !state.conflictChoice) {
+    const choice = await askConflictChoice(collisions)
+    if (choice === null) {
+      announce('Cancelled. Nothing was transferred.')
+      return { ok: false }
+    }
+    transferRequest.onConflict = choice
+    // Remembered for the rest of the session so the second paste does not ask again.
+    state.conflictChoice = choice
+  }
+
+  const result = await window.finder.transfer(transferRequest)
 
   if (!result.ok) {
     // A partial failure says exactly how far it got; a total failure says why.
@@ -3711,6 +3984,23 @@ document.addEventListener('keydown', async (event) => {
 
   const modifier = event.ctrlKey || event.metaKey
 
+  /**
+   * Type-ahead. Typing a letter jumps to the first item starting with it, and typing more
+   * letters within a moment narrows from there — the behaviour of every file manager since
+   * Windows 95, and its absence is one of the things that makes an app feel like a webpage.
+   *
+   * Only a bare printable character counts, so it cannot swallow a modifier combination:
+   * `+` alone is type-ahead, Ctrl+`+` is still zoom. Space is excluded because it is Quick
+   * Look, and the buffer is time-limited because a stale prefix would silently hijack the
+   * next unrelated keystroke.
+   */
+  if (!modifier && !event.altKey && event.key.length === 1 && event.key !== ' ') {
+    if (jumpToTyped(event.key)) {
+      event.preventDefault()
+      return
+    }
+  }
+
   // The shortcut sheet, on a key that is easy to hit and easy to remember. It belongs
   // here rather than buried in the Help menu alone: the owner did not know the app had a
   // Quick Look view, which is a discoverability failure, not a missing feature.
@@ -3783,6 +4073,9 @@ document.addEventListener('keydown', async (event) => {
   } else if (modifier && event.key === '0') {
     event.preventDefault()
     zoomReset()
+  } else if (modifier && event.shiftKey && event.key.toLowerCase() === 'h') {
+    event.preventDefault()
+    toggleHidden()
   } else if (modifier && event.shiftKey && event.key.toLowerCase() === 'c') {
     // Ctrl+Shift+C is the Windows convention for "copy the path"; plain Ctrl+C copies
     // the FILES. Both exist because they answer different questions.

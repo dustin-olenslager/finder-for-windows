@@ -35,7 +35,7 @@
  */
 
 const { normalizePath, parentOf, joinPath } = require('../domain/paths')
-const { validateName } = require('../domain/file-name')
+const { validateName, suggestUniqueName } = require('../domain/file-name')
 
 /** A folder can never be copied into itself or into its own subtree. */
 function isInside(candidate, folder) {
@@ -89,29 +89,71 @@ async function transferFiles({ fileOperations }, request) {
     return { ok: true, op, moved: 0, total: items.length, results: [] }
   }
 
+  /**
+   * What to do when the destination already holds that name.
+   *
+   *   'refuse'    (default) report it and transfer nothing under that name
+   *   'skip'      leave the existing file alone and move on, reporting what was skipped
+   *   'keep-both' bring the incoming file in under a free name ("Take 2.mp4")
+   *
+   * There is deliberately NO 'replace'. Overwriting is the one action that destroys data,
+   * and this app's standing rule is that nothing is ever overwritten automatically. Adding
+   * a destructive branch here is a decision for the owner, not one to slip in with the
+   * safe ones — so the safe two landed and Replace did not.
+   */
+  const onConflict = ['skip', 'keep-both'].includes(request?.onConflict) ? request.onConflict : 'refuse'
+
   const results = []
+  const skipped = []
   for (const { from, name, to } of sources) {
-    // Refuse to clobber. A silent overwrite is the one outcome a file manager must
-    // never produce.
+    let target = to
+    let finalName = name
+
     if (await fileOperations.exists(to)) {
-      results.push({ name, ok: false, error: `There is already an item named “${name}” in that folder.` })
-      continue
+      if (onConflict === 'skip') {
+        skipped.push(name)
+        results.push({ name, ok: true, skipped: true })
+        continue
+      }
+      if (onConflict === 'keep-both') {
+        // Ask the DESTINATION what it holds, so the suggestion is free in that folder
+        // rather than free in the source. `suggestUniqueName` has been written and tested
+        // since long before this branch existed and had no caller until now.
+        const taken = await fileOperations.listNames(destination)
+        // Do NOT remove the conflicting name from that list: `suggestUniqueName` returns
+        // the base name only when it is FREE, so filtering it out made it hand back the
+        // very name that had just collided, and the keep-both branch then refused instead
+        // of renaming. (Caught by the test, not by reading it.)
+        finalName = suggestUniqueName(name, taken)
+        target = joinPath(destination, finalName)
+        // A race could still have created that name between the listing and here; refusing
+        // is the safe answer, and it is reported like any other failure.
+        if (await fileOperations.exists(target)) {
+          results.push({ name, ok: false, error: `There is already an item named “${finalName}” in that folder.` })
+          continue
+        }
+      } else {
+        results.push({ name, ok: false, error: `There is already an item named “${name}” in that folder.` })
+        continue
+      }
     }
+
     try {
-      if (op === 'move') await fileOperations.rename(from, to)
-      else await fileOperations.copy(from, to)
-      results.push({ name, ok: true })
+      if (op === 'move') await fileOperations.rename(from, target)
+      else await fileOperations.copy(from, target)
+      results.push({ name: finalName, ok: true, renamed: finalName === name ? undefined : finalName })
     } catch (error) {
       results.push({ name, ok: false, error: sentenceFor(error) })
     }
   }
 
-  const done = results.filter((r) => r.ok).length
+  const done = results.filter((r) => r.ok && !r.skipped).length
   const failed = results.filter((r) => !r.ok)
   return {
     ok: failed.length === 0,
     op,
     moved: done,
+    skipped,
     total: sources.length,
     results,
     // A partial failure must say so, and name the first thing that went wrong.

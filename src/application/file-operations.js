@@ -34,12 +34,30 @@ async function performFileOperation({ fileOperations, networkRoots = [] }, reque
         return await rename(fileOperations, request)
       case 'trash':
         return await trash(fileOperations, request, networkRoots)
+      case 'exists':
+        return await exists(fileOperations, request)
       default:
         return { ok: false, error: `Unknown operation: ${op}` }
     }
   } catch (error) {
     return { ok: false, error: describeOperationFailure(error, request) }
   }
+}
+
+/**
+ * Does this path exist?
+ *
+ * Its own operation because the destination question is asked before a transfer, to decide
+ * whether the user needs to be asked about conflicts at all. Answering it by attempting the
+ * copy instead would mean reporting a failure the app could have prevented.
+ *
+ * A path that cannot be normalized is reported as "no operation performed", not as a
+ * failure: nothing was attempted, so calling it an error would be a lie about what happened.
+ */
+async function exists(fileOperations, request) {
+  const target = normalizePath(request?.path)
+  if (!target) return { ok: false, error: 'A path is required.' }
+  return { ok: true, exists: await fileOperations.exists(target) }
 }
 
 async function createFolder(fileOperations, request) {

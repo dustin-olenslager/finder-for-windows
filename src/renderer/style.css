@@ -786,6 +786,22 @@ body {
   outline-offset: -2px;
 }
 
+/* A real shell icon, drawn at its own 16px natural size. `image-rendering` stays default
+   so Windows' DPI scaling is respected, and the flex box keeps it from being squashed by
+   a long filename next to it. */
+.file-icon {
+  width: 16px;
+  height: 16px;
+  display: block;
+  object-fit: contain;
+  flex: none;
+}
+
+.icon-art .file-icon {
+  width: 32px;
+  height: 32px;
+}
+
 .row .glyph {
   width: 16px;
   height: 16px;

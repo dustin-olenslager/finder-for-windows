@@ -76,7 +76,14 @@ function loadMain() {
           loadFile: () => {},
           isDestroyed: () => false,
           show: () => {},
-          setProgressBar: () => {}
+          setProgressBar: () => {},
+          // Window geometry: the tracker reads these on every resize/move and again on
+          // close, so the stub has to be able to answer.
+          getBounds: () => ({ x: 0, y: 0, width: 1180, height: 760 }),
+          getNormalBounds: () => ({ x: 0, y: 0, width: 1180, height: 760 }),
+          isMaximized: () => false,
+          maximize: () => {},
+          removeAllListeners: () => {}
         }
         windows.push(win)
         return win
@@ -91,6 +98,13 @@ function loadMain() {
       showItemInFolder: () => {}
     },
     clipboard: { writeText: () => {}, readText: () => '' },
+    // The composition root validates a restored window position against the real display
+    // list, because a saved position for an unplugged monitor opens the window off screen.
+    screen: {
+      getAllDisplays: () => [
+        { id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, workArea: { x: 0, y: 0, width: 1920, height: 1040 } }
+      ]
+    },
     nativeImage: { createFromPath: () => ({ isEmpty: () => true }) },
     Menu: { setApplicationMenu: () => {}, buildFromTemplate: () => ({}) }
   }

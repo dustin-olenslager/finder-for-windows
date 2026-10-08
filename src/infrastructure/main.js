@@ -8,7 +8,7 @@
  * it may import Electron, Node's fs, or any vendor module.
  */
 
-const { app, BrowserWindow, ipcMain, shell, clipboard } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, clipboard, screen } = require('electron')
 const { execFile } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -29,6 +29,8 @@ const { createFsIndexWalker } = require('../adapters/fs-index-walker')
 const { createJsonIndexStore } = require('../adapters/json-index-store')
 const { createElectronKnownFolders } = require('../adapters/electron-known-folders')
 const { createWindowsDrives } = require('../adapters/windows-drives')
+const { createFileIconProvider } = require('../adapters/electron-file-icons')
+const { createWindowState, isVisibleOn } = require('./window-state')
 const { normalizePath, parentOf, joinPath, segments } = require('../domain/paths')
 
 /** `execFile` as a promise with a hard timeout, so no drive can hang the UI. */
@@ -42,7 +44,7 @@ function exec(command, args, { timeout = 4000 } = {}) {
 }
 
 /** Build the wired-up use cases for this process. */
-function createContainer() {
+function createContainer({ fileIcons }) {
   const directoryReader = createFsDirectoryReader()
   const fileReader = createFsFileReader()
   // Electron's shell.trashItem is the only supported route to the Windows Recycle Bin,
@@ -83,6 +85,16 @@ function createContainer() {
     pathSegments: (dirPath) => segments(dirPath),
 
     getPreview: (filePath, name) => getPreview({ fileReader }, filePath, name),
+
+    /**
+     * The OS's own icon for a file type, for the listing to swap in behind its own glyph.
+     * Returns { ok, icon } with icon null when the shell has no answer — a normal result,
+     * not an error, because the built-in vector glyph is a fine fallback.
+     */
+    fileIcon: async (target, isDirectory) => ({
+      ok: true,
+      icon: await fileIcons.forPath(target, isDirectory)
+    }),
 
     /**
      * The drive list is consulted so a mapped network drive can be refused before anything
@@ -155,10 +167,17 @@ function createContainer() {
   }
 }
 
-function createWindow() {
+function createWindow(remembered) {
+  // A remembered position is only used if it is still on a display that exists. Restoring
+  // coordinates for a monitor that has been unplugged puts the window off screen, which
+  // looks to the user like the app failing to open at all.
+  const displays = screen.getAllDisplays()
+  const bounds = remembered?.bounds && isVisibleOn(remembered.bounds, displays) ? remembered.bounds : null
+
   const win = new BrowserWindow({
-    width: 1180,
-    height: 760,
+    width: bounds?.width ?? 1180,
+    height: bounds?.height ?? 760,
+    ...(bounds ? { x: bounds.x, y: bounds.y } : {}),
     minWidth: 720,
     minHeight: 460,
     title: 'Finder for Windows',
@@ -188,8 +207,12 @@ function createWindow() {
   return win
 }
 
-app.whenReady().then(() => {
-  const container = createContainer()
+app.whenReady().then(async () => {
+  // The shell-icon provider lives at this scope, not inside createContainer, because it is
+  // the IPC boundary that calls it — the same reason `watcher` is built here. It is passed
+  // INTO the container so the composition root wires it like every other adapter.
+  const fileIcons = createFileIconProvider({ app })
+  const container = createContainer({ fileIcons })
   const watcher = createFolderWatcher(() => {
     const win = BrowserWindow.getAllWindows()[0]
     if (win && !win.isDestroyed()) win.webContents.send('folders-changed')
@@ -255,6 +278,17 @@ app.whenReady().then(() => {
     // Read back what the engine actually holds, so "applied" is a fact and not a hope.
     return { ok: true, factor: win.webContents.getZoomFactor() }
   })
+  /**
+   * The OS's own icon for a file type.
+   *
+   * One handler, called with a SAMPLE path per file type, and cached on both sides: the
+   * adapter caches by extension, so the shell is asked once per type rather than once per
+   * file. Returns null when the shell has no answer, which is not an error.
+   */
+  ipcMain.handle('file-icon', (_event, target, isDirectory) =>
+    container.fileIcon(target, Boolean(isDirectory))
+  )
+
   ipcMain.handle('reveal-in-explorer', (_event, target) => {
     shell.showItemInFolder(target)
     return { ok: true }
@@ -264,7 +298,20 @@ app.whenReady().then(() => {
     return error ? { ok: false, error } : { ok: true }
   })
 
-  const mainWindow = createWindow()
+  const windowState = createWindowState({
+    dataDir: app.getPath('userData'),
+    defaultWidth: 1180,
+    defaultHeight: 760,
+    minWidth: 720,
+    minHeight: 460
+  })
+  const remembered = await windowState.read()
+
+  const mainWindow = createWindow(remembered)
+  windowState.track(mainWindow)
+  // Maximizing is restored AFTER the window is ready: doing it during construction on
+  // Windows can produce a window that is maximized but reports the restored bounds.
+  if (remembered?.maximized) mainWindow.once('ready-to-show', () => mainWindow.maximize())
   mainWindow.on('closed', () => watcher.close())
 
   app.on('activate', () => {

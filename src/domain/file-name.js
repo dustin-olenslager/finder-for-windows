@@ -72,15 +72,33 @@ function validateName(name) {
   return { ok: true, name: trimmed }
 }
 
-/** A name that is free, given the names already present. */
+/**
+ * A name that is free, given the names already present.
+ *
+ * The counter goes BEFORE the extension, because the extension is what tells every other
+ * program what the file is: `Take 1 2.mp4` is a video and `Take 1.mp4 2` is not. Explorer
+ * and Finder both number this way, so the alternative is a file this app creates that the
+ * rest of the system no longer recognises.
+ *
+ * A LEADING dot is not an extension: `.gitignore 2` is right and `2.gitignore` would turn a
+ * dotfile into a hidden file with the extension "gitignore". Only a dot with something
+ * before it counts.
+ */
 function suggestUniqueName(base, existingNames) {
   const taken = new Set(existingNames.map((n) => String(n).toLowerCase()))
   if (!taken.has(base.toLowerCase())) return base
+
+  const name = String(base)
+  const dot = name.lastIndexOf('.')
+  const hasExtension = dot > 0 && dot < name.length - 1
+  const stem = hasExtension ? name.slice(0, dot) : name
+  const extension = hasExtension ? name.slice(dot) : ''
+
   for (let index = 2; index < 10_000; index += 1) {
-    const candidate = `${base} ${index}`
+    const candidate = `${stem} ${index}${extension}`
     if (!taken.has(candidate.toLowerCase())) return candidate
   }
-  return `${base} ${Date.now()}`
+  return `${stem} ${Date.now()}${extension}`
 }
 
 module.exports = { validateName, suggestUniqueName, RESERVED, MAX_LENGTH }

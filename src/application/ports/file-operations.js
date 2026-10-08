@@ -10,15 +10,18 @@
  *   rename(from, to)       -> Promise<void>
  *   trash(path)            -> Promise<void>            moves to the OS trash, not delete
  *   exists(path)           -> Promise<boolean>
+ *   listNames(dir)         -> Promise<string[]>       names directly inside `dir`
  *
  *   - `trash` MUST use the platform trash (the Windows Recycle Bin), never an
  *     unlink: the spec requires every deletion be recoverable outside this app
  *     (D-0007).
  *   - None of these may swallow an error: the use case turns a failure code into a
  *     sentence for the user.
+ *   - `listNames` exists so "Keep both" can find a free name in the DESTINATION rather
+ *     than guessing: the free name must be free in the folder being written to.
  */
 
-const REQUIRED_METHODS = ['mkdir', 'rename', 'trash', 'exists']
+const REQUIRED_METHODS = ['mkdir', 'rename', 'trash', 'exists', 'listNames']
 
 function assertFileOperations(candidate) {
   for (const method of REQUIRED_METHODS) {

@@ -1722,6 +1722,141 @@ with sync_playwright() as p:
     check("the empty state is centred rather than pinned to a corner",
           bool(empty_state) and empty_state["display"] == "flex" and empty_state["justify"] == "center", str(empty_state))
 
+    # ---- P3: the native tells --------------------------------------------------------
+    # Back to column view first: the P2 block above switched to the list, so there is no
+    # column to click until this goes back.
+    pg.keyboard.press("Control+1")
+    pg.wait_for_timeout(700)
+    # Real file-type icons come from the OS, and the swap must be per TYPE: a folder of
+    # 5,000 videos costs one lookup, which is why the harness counts how many it was asked.
+    pg.click('.column[data-index="0"] .row[data-name="Videos"]')
+    pg.wait_for_timeout(1200)
+    # Clear the cache so the requests actually happen: by this point in the run the types
+    # have been seen already, and measuring a warm cache would assert nothing.
+    pg.evaluate("() => window.finder.__clearIconCache()")
+    pg.evaluate("() => window.finder.__forceIconLoad()")
+    pg.wait_for_timeout(1400)
+    icons = pg.evaluate("""() => {
+        const rows = [...document.querySelectorAll('.column:last-child .row')];
+        const swaps = rows.filter((r) => r.querySelector('img.file-icon')).length;
+        const vector = rows.filter((r) => r.querySelector('svg')).length;
+        const asked = (window.__iconAsked || []);
+        const byType = new Set(asked.map((p) => p.slice(p.lastIndexOf('.'))));
+        return { rows: rows.length, swaps, vector, asked: asked.length, types: byType.size };
+    }""")
+    check("the shell is asked once per file type, not once per file",
+          icons["asked"] <= icons["types"] + 1 and icons["asked"] < icons["rows"] + 1, str(icons))
+    check("a type the shell knows gets its real icon", icons["swaps"] > 0, str(icons))
+    check("a type the shell does not know keeps the built-in glyph",
+          icons["vector"] > 0, str(icons))
+
+    # Type-ahead: typing a letter jumps the selection, the way every file manager does.
+    pg.click('.column:last-child .row')
+    pg.wait_for_timeout(300)
+    first = pg.evaluate("() => window.finder.__state().selected?.name || null")
+    typed = pg.evaluate("""() => {
+        const rows = [...document.querySelectorAll('.column:last-child .row:not([data-dir="1"])')];
+        const target = rows.map((r) => r.dataset.name).sort()[rows.length - 1];
+        return target;
+    }""")
+    pg.keyboard.press(typed[0].lower())
+    pg.wait_for_timeout(500)
+    jumped = pg.evaluate("() => window.finder.__state().selected?.name || null")
+    check("typing a letter jumps the selection to that item",
+          jumped is not None and jumped.lower().startswith(typed[0].lower()), f"{typed[0]!r} -> {jumped!r}")
+    check("type-ahead is not a no-op when something already matched",
+          jumped != first or (first or '').lower().startswith(typed[0].lower()), f"{first!r} -> {jumped!r}")
+
+    # Type-ahead must not swallow a modifier combination: Ctrl+2 is still the list view.
+    pg.keyboard.press("Control+2")
+    pg.wait_for_timeout(600)
+    check("a modifier combination is not eaten by type-ahead",
+          pg.evaluate("() => !!document.querySelector('.content-list, .list-header')"))
+
+    # Hidden files: the attribute was computed for every item and never used.
+    hidden_before = pg.evaluate("() => window.finder.__state().showHidden")
+    pg.keyboard.press("Control+Shift+H")
+    pg.wait_for_timeout(600)
+    hidden_after = pg.evaluate("() => window.finder.__state().showHidden")
+    check("Ctrl+Shift+H toggles hidden files", hidden_before is False and hidden_after is True,
+          f"{hidden_before} -> {hidden_after}")
+    spoke_hidden = pg.evaluate("() => (document.getElementById('announcer').textContent || '') + (document.querySelector('.toast')?.textContent || '')")
+    check("the hidden-file toggle says which way it went", "hidden" in spoke_hidden.lower(), repr(spoke_hidden))
+
+    # The View menu must state the CURRENT setting, not just offer a verb.
+    menu_label = pg.evaluate("""() => {
+        const btn = [...document.querySelectorAll('.menubar button')].find((b) => /view/i.test(b.textContent));
+        if (!btn) return null;
+        btn.click();
+        const entries = [...document.querySelectorAll('.menu-entry')].map((e) => e.textContent);
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        return entries;
+    }""")
+    check("the View menu offers Show Hidden Files with its state",
+          bool(menu_label) and any("Hidden Files" in x for x in menu_label), str(menu_label))
+    check("the View menu marks the setting when it is on",
+          bool(menu_label) and any("\u2713" in x and "Hidden" in x for x in menu_label), str(menu_label))
+    pg.keyboard.press("Control+Shift+H")
+    pg.wait_for_timeout(400)
+
+    # Copying onto a name that already exists must ASK, and must not offer to replace.
+    #
+    # Staged through the app's own state rather than through a context menu: `__state()`
+    # hands back the LIVE state object, so the clipboard can be set directly. That removes
+    # the dependency on which folder happens to be on screen, which is what made the first
+    # version of this check throw on a null row.
+    staged = pg.evaluate("""() => {
+        const s = window.finder.__state();
+        const column = s.columns[s.columns.length - 1];
+        if (!column) return null;
+        const file = column.items.find((i) => !i.isDirectory);
+        if (!file) return null;
+        const path = file.path || (column.path + '\\\\' + file.name);
+        s.clipboard = { op: 'copy', items: [{ name: file.name, path }] };
+        // The destination already holds it, which is the whole point.
+        window.__existing = [path];
+        return { name: file.name, path, folder: column.path };
+    }""")
+    check("a file was staged to collide with itself", staged is not None, str(staged))
+    # NOT awaited. `pasteInto` genuinely waits for the user's answer, so awaiting it here
+    # would deadlock the check against a dialog it is itself waiting to close — the first
+    # version of this timed out after 30s for exactly that reason. The pending result is
+    # parked on window and read after the answer is given.
+    pg.evaluate("""() => {
+        const s = window.finder.__state();
+        const column = s.columns[s.columns.length - 1];
+        window.__pasteResult = window.finder.__pasteInto(column.path);
+        return true;
+    }""")
+    pg.wait_for_timeout(600)
+    conflict = pg.evaluate("""() => {
+        const m = document.querySelector('.modal');
+        if (!m) return null;
+        return {
+            title: m.querySelector('.modal-title')?.textContent || '',
+            body: m.querySelector('.modal-body')?.textContent || '',
+            choices: [...m.querySelectorAll('[data-choice]')].map((b) => b.dataset.choice),
+            labels: [...m.querySelectorAll('[data-choice]')].map((b) => b.textContent),
+            focused: document.activeElement?.textContent || ''
+        };
+    }""")
+    check("pasting onto an existing name asks before doing anything", conflict is not None, str(conflict))
+    check("the conflict dialog explains itself", bool(conflict) and "already" in conflict["body"], str(conflict))
+    check("the conflict dialog offers Keep both", bool(conflict) and "keep-both" in conflict["choices"], str(conflict))
+    check("the conflict dialog offers Skip", bool(conflict) and "skip" in conflict["choices"], str(conflict))
+    check("the conflict dialog refuses to offer Replace",
+          bool(conflict) and "replace" not in [c.lower() for c in conflict["choices"]], str(conflict))
+    check("the conflict dialog defaults to the answer that changes nothing",
+          bool(conflict) and conflict["focused"] in ("Skip it", "Skip them"), str(conflict))
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(400)
+    cancelled = pg.evaluate("""async () => {
+        const result = await (window.__pasteResult || Promise.resolve(null));
+        return { ok: result ? result.ok : null, copied: (window.__copied || []).length };
+    }""")
+    check("cancelling the conflict question transfers nothing",
+          cancelled["ok"] is False or cancelled["copied"] == 0, str(cancelled))
+
     # Recomputed at the very end, after everything above has moved the UI around.
     leaked = hidden_but_visible()
     check("no element marked hidden is actually visible", leaked == [], str(leaked))

@@ -32,6 +32,17 @@ function createFsFileOperations({ trash }) {
       await fs.rename(from, to)
     },
 
+    /**
+     * The names directly inside a folder. Used by "Keep both" to find a free name, which
+     * must be free in the folder being WRITTEN TO rather than in the one being read from.
+     * Names only (no stats), because that is all the caller needs and listing a large
+     * folder should not pay for metadata it will never read.
+     */
+    async listNames(target) {
+      const entries = await fs.readdir(target, { withFileTypes: true })
+      return entries.map((entry) => entry.name)
+    },
+
     async trash(target) {
       await trash(target)
     },

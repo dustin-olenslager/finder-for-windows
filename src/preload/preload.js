@@ -91,6 +91,15 @@ contextBridge.exposeInMainWorld('finder', {
 
   /** Escape hatch: show the item in Windows Explorer. */
   revealInExplorer: (target) => ipcRenderer.invoke('reveal-in-explorer', target),
+  /**
+   * The operating system's own icon for a file type.
+   *
+   * Sent with a SAMPLE path per type rather than one call per row: every .mp4 resolves to
+   * the same icon, so the listing asks once per type and the main process caches by
+   * extension. Fire-and-forget from the renderer's point of view — the built-in vector
+   * glyph stays on screen until (and unless) the real icon arrives.
+   */
+  fileIcon: (target, isDirectory) => ipcRenderer.invoke('file-icon', target, isDirectory),
 
   /** Open an item with the Windows default application. */
   openWithDefault: (target) => ipcRenderer.invoke('open-with-default', target),
