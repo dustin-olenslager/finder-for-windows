@@ -22,6 +22,8 @@ const el = {
   search: document.getElementById('search'),
   statusCount: document.getElementById('statusCount'),
   statusPath: document.getElementById('statusPath'),
+  announcer: document.getElementById('announcer'),
+  alerts: document.getElementById('alerts'),
   breadcrumb: document.getElementById('breadcrumb'),
   preview: document.getElementById('preview'),
   previewBody: document.getElementById('previewBody'),
@@ -549,12 +551,56 @@ function presentItems(items) {
 // Rendering
 // ---------------------------------------------------------------------------
 
+/**
+ * What to call a column when it is read out. The path is the honest label: "Videos" alone
+ * is ambiguous when three columns are open.
+ */
+function columnLabel(column) {
+  if (column.error) return `Could not open ${column.path || 'the folder'}`
+  return `${baseName(column.path) || column.path || 'Folder'}, ${pluralize(column.items.length, 'item')}`
+}
+
+/**
+ * Say what just happened, once per change.
+ *
+ * Deliberately a short sentence and not the status bar verbatim: a screen reader reading
+ * "12 items · 3 folders" after every keystroke is unusable. This fires from render(),
+ * which runs on every state change, so the guard against repeating the same sentence is
+ * what keeps it from being noise.
+ */
+let lastAnnouncement = ''
+function announceState() {
+  if (state.searchText) return
+  const column = activeColumn()
+  if (!column) return
+  if (column.error) {
+    sayError(column.error)
+    lastAnnouncement = ''
+    return
+  }
+  const shown = presentItems(column.items)
+  const hidden = column.items.length - shown.length
+  let message
+  if (state.selected) {
+    message = `${state.selected.name}, ${state.selected.isDirectory ? 'folder' : 'file'}`
+    const position = shown.findIndex((i) => i.name === state.selected.name)
+    if (position >= 0) message += `, ${position + 1} of ${shown.length}`
+  } else {
+    message = `${baseName(column.path) || 'Folder'}, ${pluralize(shown.length, 'item')}`
+    if (hidden > 0) message += `, ${hidden} hidden by the filter`
+  }
+  if (message === lastAnnouncement) return
+  lastAnnouncement = message
+  announce(message)
+}
+
 function render() {
   if (state.searchText) renderSearchResults()
   else if (state.view === 'column') renderColumns()
   else if (state.view === 'list') renderList()
   else renderIcons()
   renderStatus()
+  announceState()
   renderNavButtons()
   renderBreadcrumb()
   renderPreview()
@@ -637,6 +683,10 @@ function buildRow(item, { showMeta = false } = {}) {
   row.draggable = true
   row.setAttribute('role', 'option')
   row.setAttribute('aria-selected', 'false')
+  // Tab must be able to REACH the files. Before this the file list was unreachable by
+  // keyboard entirely: every command had a shortcut, but a keyboard-only user could not
+  // get to the list to use one, so the shortcuts were theoretical.
+  row.tabIndex = -1
 
   const glyph = document.createElement('span')
   glyph.className = 'glyph'
@@ -925,6 +975,15 @@ function renderColumns() {
     pane.className = 'column'
     pane.dataset.index = String(index)
     pane.dataset.path = column.path || ''
+    // A listbox, so the files are a thing a screen reader can enter and read. Only one
+    // column is tabbable (the active one): 40 files must not mean 40 Tab presses to get
+    // past the list, which is the standard listbox pattern and why rows are tabIndex -1.
+    pane.setAttribute('role', 'listbox')
+    pane.setAttribute('aria-label', columnLabel(column))
+    // Only the ACTIVE column is a tab stop. Testing `column.selectedName` was wrong: in
+    // column view several columns hold a selection at once, so all three became tab stops
+    // and Tab walked through them. The active column is the one the arrows act on.
+    if (column === activeColumn()) pane.tabIndex = 0
 
     const items = presentItems(column.items)
 
@@ -1836,7 +1895,12 @@ function moveSelection(delta) {
   selectInColumn(index, next.name)
 
   requestAnimationFrame(() => {
-    el.content.querySelector('.row.is-selected')?.scrollIntoView({ block: 'nearest' })
+    const row = el.content.querySelector('.row.is-selected')
+    row?.scrollIntoView({ block: 'nearest' })
+    // Move real DOM focus to the selected row. Selection and focus are the same thing in a
+    // listbox: without this a screen reader keeps reading the toolbar while the highlight
+    // moves down the list, so the arrow keys were silent.
+    if (document.activeElement?.classList.contains('row')) row?.focus({ preventScroll: true })
   })
 }
 
@@ -1925,6 +1989,61 @@ function promptForName({ title, value, confirmLabel }) {
 }
 
 /**
+ * Ask a yes/no question, and get an answer either way.
+ *
+ * Built on the same modal-card as promptForName so it looks and behaves like the rest of
+ * the app rather than like a browser `confirm()`. Focus lands on Cancel, not on the
+ * destructive button: the safe answer is the one you get by pressing Enter out of habit.
+ */
+function confirmDialog({ title, body, confirmLabel }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div')
+    overlay.className = 'modal'
+    overlay.innerHTML = `
+      <form class="modal-card" role="dialog" aria-modal="true">
+        <h2 class="modal-title"></h2>
+        <p class="modal-body"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" data-action="cancel"></button>
+          <button type="submit" class="btn-primary"></button>
+        </div>
+      </form>`
+
+    overlay.querySelector('.modal-title').textContent = title
+    overlay.querySelector('.modal-body').textContent = body
+    overlay.querySelector('.btn-secondary').textContent = 'Cancel'
+    overlay.querySelector('.btn-primary').textContent = confirmLabel
+
+    const close = (result) => {
+      overlay.remove()
+      document.removeEventListener('keydown', onKey, true)
+      resolve(result)
+    }
+
+    function onKey(event) {
+      if (event.key === 'Escape') {
+        event.stopPropagation()
+        close(false)
+      }
+    }
+
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) close(false)
+    })
+    overlay.querySelector('[data-action="cancel"]').addEventListener('click', () => close(false))
+    overlay.querySelector('form').addEventListener('submit', (event) => {
+      event.preventDefault()
+      close(true)
+    })
+
+    document.addEventListener('keydown', onKey, true)
+    document.body.append(overlay)
+    // Cancel first, on purpose.
+    overlay.querySelector('.btn-secondary').focus()
+  })
+}
+
+/**
  * Run an operation, and if the name is refused, re-ask with the reason shown. A
  * rejected name is a normal thing to correct, not a dead end.
  */
@@ -1997,6 +2116,34 @@ async function renameSelected() {
 async function trashSelected() {
   const items = selectedItems()
   if (items.length === 0) return
+
+  /**
+   * Confirm before a destructive action that cannot be judged by its size.
+   *
+   * A single file is a normal, expected action and gets no dialog. Two or more is not:
+   * `Ctrl+A` followed by `Delete` — the shortcut the audit flagged — bins the whole folder
+   * with no prompt and no way back beyond the Recycle Bin. A FOLDER is confirmed even on
+   * its own, because what it contains is not visible from here and the count of what will
+   * go is the one thing the user cannot see.
+   *
+   * The message names the count rather than asking a vague "are you sure": a dialog that
+   * does not say what is about to happen is a dialog people click through.
+   */
+  const folder = items.find((i) => i.isDirectory)
+  if (items.length > 1 || folder) {
+    const what = items.length === 1
+      ? `the folder “${items[0].name}” and everything in it`
+      : `${items.length} items`
+    const ok = await confirmDialog({
+      title: 'Move to Recycle Bin',
+      body: `Move ${what} to the Recycle Bin?`,
+      confirmLabel: 'Move to Recycle Bin'
+    })
+    if (!ok) {
+      announce('Cancelled. Nothing was moved.')
+      return
+    }
+  }
 
   let moved = 0
   const failures = []
@@ -2091,11 +2238,46 @@ function syncWatchers() {
   window.finder.watchFolders(paths).catch(() => {})
 }
 
+/**
+ * Say something to a screen reader.
+ *
+ * Everything the app tells the user visually has to be said out loud too, or the app is
+ * silent to anyone who cannot see it: the status count changing, a toast appearing and
+ * vanishing three seconds later, a folder that failed to read. These regions are
+ * `sr-only`, so this is additive and changes nothing on screen.
+ *
+ * The text is cleared first and set on the next frame. A live region only announces a
+ * CHANGE, so writing the same sentence twice (select the same file again) would be silent
+ * without the reset.
+ */
+function announce(message) {
+  if (!el.announcer) return
+  el.announcer.textContent = ''
+  requestAnimationFrame(() => {
+    el.announcer.textContent = message
+  })
+}
+
+/** An error interrupts instead of waiting its turn: it needs attention now. */
+function sayError(message) {
+  if (!el.alerts) return
+  el.alerts.textContent = ''
+  requestAnimationFrame(() => {
+    el.alerts.textContent = message
+  })
+}
+
 function showToast(message) {
   const toast = document.createElement('div')
   toast.className = 'toast'
   toast.textContent = message
+  // role=status so a toast is spoken as well as shown; it is the only channel by which
+  // "Copied" or "2 of 3 done" reaches a screen-reader user.
+  toast.setAttribute('role', 'status')
   document.body.append(toast)
+  // Said through the announcer too: a role=status node that is REMOVED after 3s may be
+  // dropped mid-sentence by some readers.
+  announce(message)
   setTimeout(() => toast.classList.add('is-leaving'), 2600)
   setTimeout(() => toast.remove(), 3100)
 }
@@ -3500,6 +3682,23 @@ document.addEventListener('keydown', async (event) => {
   }
 
   if (event.target === el.search) return
+
+  /**
+   * A focused BUTTON owns Enter and Space — that is what a button is for.
+   *
+   * This handler is on `document` and preventDefaults these keys, so before this guard,
+   * tabbing to the toolbar, the sidebar or a dialog button and pressing Enter or Space did
+   * nothing at all: the app ran its own folder command instead of activating the control
+   * the user had actually focused. Every keyboard-only user was blocked here, and it also
+   * made Space unusable on any button because it opened Quick Look.
+   *
+   * Checked before every other branch, because this is a correctness rule about who owns
+   * the key, not one command among many. The file list is not a button, so its own keys
+   * (Enter opens, Space is Quick Look) still work exactly as before.
+   */
+  const active = document.activeElement
+  const isButton = active && (active.tagName === 'BUTTON' || active.getAttribute('role') === 'button')
+  if (isButton && (event.key === 'Enter' || event.key === ' ')) return
 
   const modifier = event.ctrlKey || event.metaKey
 

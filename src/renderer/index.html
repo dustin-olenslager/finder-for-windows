@@ -141,7 +141,7 @@
 
   <div class="body">
     <nav class="sidebar" id="sidebar" aria-label="Sidebar"></nav>
-    <main class="content" id="content" aria-live="polite">
+    <main class="content" id="content" aria-live="off">
       <p class="hint">Loading…</p>
     </main>
     <aside class="preview" id="preview" aria-label="Preview">
@@ -171,6 +171,14 @@
     <span class="status-count" id="statusCount"></span>
     <span class="status-path" id="statusPath"></span>
   </footer>
+
+  <!-- What the app SAYS, for anyone who cannot see it. Screen readers ignore a visually
+       updated status bar: a count that changes from "12 items" to "0 items" is silent, and
+       so is a toast that appears and disappears. This is the one region that gets spoken,
+       and the app writes a short sentence here whenever the important state changes.
+       Two regions, because an error has to interrupt (assertive) while a count must not. -->
+  <div class="sr-only" id="announcer" role="status" aria-live="polite" aria-atomic="true"></div>
+  <div class="sr-only" id="alerts" role="alert" aria-live="assertive" aria-atomic="true"></div>
 
   <!-- Quick Look: the spacebar overlay -->
   <div class="quicklook" id="quicklook" hidden>

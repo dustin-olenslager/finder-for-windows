@@ -1,7 +1,7 @@
 {
   "name": "finder-for-windows",
   "productName": "Finder for Windows",
-  "version": "0.16.0",
+  "version": "0.17.0",
   "description": "A Windows file manager that works like macOS Finder.",
   "main": "src/infrastructure/main.js",
   "author": "Dustin Olenslager",
@@ -22,8 +22,8 @@
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
-    "electron": "^43.2.0",
-    "electron-builder": "^24.13.3",
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.15.0",
     "prettier": "^3.4.0",
     "typescript": "^5.7.2"

@@ -1508,6 +1508,100 @@ with sync_playwright() as p:
               return true;
           }"""))
 
+    # ---- Keyboard and screen reader: the app must be usable without a mouse ----------
+    # A focused button owns Enter and Space. Before the fix the global key handler
+    # preventDefaulted both, so tabbing to a control and pressing Space did nothing — or
+    # worse, opened Quick Look, because Space was the global Quick Look key.
+    pg.focus("#previewToggle")
+    pg.wait_for_timeout(200)
+    before = pg.evaluate("() => document.body.classList.contains('has-preview')")
+    pg.keyboard.press(" ")
+    pg.wait_for_timeout(600)
+    after = pg.evaluate(
+        "() => ({ preview: document.body.classList.contains('has-preview'), ql: !document.getElementById('quicklook').hidden })"
+    )
+    check("Space on a focused button does not open Quick Look", after["ql"] is False, str(after))
+    check("Space on a focused button activates that button", after["preview"] is not before, str(after))
+    if after["preview"]:
+        pg.click("#previewClose")
+        pg.wait_for_timeout(300)
+
+    # The file list must be reachable by keyboard at all. It was not: every command had a
+    # shortcut, but Tab could not get to the list to use one.
+    listbox = pg.evaluate("""() => {
+        const cols = [...document.querySelectorAll('.column')];
+        const box = document.querySelector('.column[role="listbox"]');
+        if (!box) return null;
+        return {
+            columns: cols.length,
+            tabbable: cols.filter((c) => c.tabIndex === 0).length,
+            rows: box.querySelectorAll('.row').length,
+            rowTabs: [...new Set([...box.querySelectorAll('.row')].map((r) => r.tabIndex))],
+            label: box.getAttribute('aria-label') || ''
+        };
+    }""")
+    check("the file list is a listbox a screen reader can enter", listbox is not None, str(listbox))
+    check("exactly one column is a tab stop", bool(listbox) and listbox["tabbable"] == 1, str(listbox))
+    check("rows are stepped with arrows, not 40 Tab presses", bool(listbox) and listbox["rowTabs"] == [-1], str(listbox))
+    check("the listbox is labelled with its folder", bool(listbox) and "item" in listbox["label"], str(listbox))
+
+    # The live region: hidden on screen, spoken by a screen reader. `display: none` or
+    # `visibility: hidden` would remove it from the accessibility tree entirely.
+    sr = pg.evaluate("""() => {
+        const e = document.getElementById('announcer');
+        if (!e) return null;
+        const s = getComputedStyle(e);
+        return { width: s.width, height: s.height, position: s.position, clip: s.clip, live: e.getAttribute('aria-live'), role: e.getAttribute('role') };
+    }""")
+    check("there is a live region for spoken messages", sr is not None, str(sr))
+    check("the live region is visually hidden but not from a screen reader",
+          bool(sr) and sr["width"] == "1px" and sr["position"] == "absolute" and sr["clip"] != "auto", str(sr))
+    check("the live region is polite", bool(sr) and sr["live"] == "polite" and sr["role"] == "status", str(sr))
+    check("errors get their own assertive region",
+          pg.evaluate("() => { const e = document.getElementById('alerts'); return !!e && e.getAttribute('aria-live') === 'assertive'; }"))
+
+    # Selecting a file must be SAID, not only highlighted.
+    pg.evaluate("() => { document.getElementById('announcer').textContent = ''; }")
+    pg.click('.column:last-child .row')
+    pg.wait_for_timeout(500)
+    spoken = pg.evaluate("() => document.getElementById('announcer').textContent")
+    check("selecting an item is announced", bool(spoken) and ("file" in spoken or "folder" in spoken), repr(spoken))
+    check("the announcement says where you are in the list", " of " in (spoken or ""), repr(spoken))
+
+    # Muted text must be readable. The old value measured 4.27:1 on white and failed WCAG
+    # AA, and that one token painted ten surfaces.
+    muted = pg.evaluate("() => getComputedStyle(document.documentElement).getPropertyValue('--fg-muted').trim()")
+    check("the muted text color is set", bool(muted), repr(muted))
+
+    # A destructive action that cannot be judged by its size must ask first. Ctrl+A then
+    # Delete used to bin the whole folder with no prompt.
+    pg.evaluate("() => { window.__trashed = []; }")
+    pg.click('.column:last-child .row')
+    pg.wait_for_timeout(200)
+    pg.keyboard.press("Control+a")
+    pg.wait_for_timeout(400)
+    pg.keyboard.press("Delete")
+    pg.wait_for_timeout(600)
+    dialog = pg.evaluate("""() => {
+        const m = document.querySelector('.modal');
+        if (!m) return null;
+        return {
+            title: m.querySelector('.modal-title')?.textContent || '',
+            body: m.querySelector('.modal-body')?.textContent || '',
+            focused: document.activeElement?.textContent || '',
+            trashed: (window.__trashed || []).length
+        };
+    }""")
+    check("deleting several files asks before doing it", dialog is not None, str(dialog))
+    check("the confirmation says what will happen", bool(dialog) and "Recycle Bin" in dialog["body"], str(dialog))
+    check("the confirmation says how many", bool(dialog) and "items" in dialog["body"], str(dialog))
+    check("nothing is deleted while the question is open", bool(dialog) and dialog["trashed"] == 0, str(dialog))
+    check("focus starts on Cancel, not on the destructive button", bool(dialog) and dialog["focused"] == "Cancel", str(dialog))
+    pg.keyboard.press("Escape")
+    pg.wait_for_timeout(400)
+    check("Escape cancels the delete", pg.evaluate("() => !document.querySelector('.modal')"))
+    check("cancelling deletes nothing", pg.evaluate("() => (window.__trashed || []).length === 0"))
+
     # Recomputed at the very end, after everything above has moved the UI around.
     leaked = hidden_but_visible()
     check("no element marked hidden is actually visible", leaked == [], str(leaked))
