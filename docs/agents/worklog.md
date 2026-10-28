@@ -12,6 +12,14 @@ Format: `- YYYY-MM-DD — <what changed, and where>`
 
 ---
 
+- 2026-10-28 — **Architecture gate wired** (`chore/architecture-gate`): `.dependency-cruiser.cjs` encodes the four-layer map as
+  `forbidden` rules at error severity (domain imports nothing but itself; application never reaches adapters or the I/O
+  built-ins; adapters never import the composition root; renderer talks IPC only; no cycles), with `npm run arch:check` /
+  `arch:baseline` and an **Architecture boundaries** step in `verify.yml` replacing the kit's `<ARCH_CHECK_CMD>` placeholder.
+  Clean tree cruises at 38 modules / 50 dependencies / 0 violations in 0.86 s; four planted inversions each fail with their own
+  rule name (the first version of `domain-stays-pure` used `dependencyTypes` and let devDependency `electron` through — the probe
+  caught it). `clean-architecture.md` now states the wired gate instead of the "Not wired yet" note. Spec + plan:
+  `docs/agents/app/architecture-gate/`.
 - 2026-10-06 — Adopted the Panoply governance kit: adapted `AGENTS.md` (stack, commands, layer map, STRICT approval), pruned 8 inapplicable rule modules, filled every placeholder, scaffolded `docs/agents/` (roadmap, in-progress, worklog, completed-features, architecture, key-patterns).
 - 2026-10-05 — Recorded all ten owner decisions (D-0001 … D-0010) in `docs/agents/decisions/0001-open-decisions.md`, including two owner overrides of the SME panel (content search in v1; Windows shortcut grammar). Added the durable decision card (`docs/index.html`, published via GitHub Pages) and its rendered PNG.
 - 2026-10-05 — Wrote `docs/agents/app/foundation/spec.md`: goal, 8 user stories each with an independent test, 38 numbered requirements, edge cases, entities, 7 measurable success criteria, assumptions, the SME-panel expert record and 4 simulated persona interviews.

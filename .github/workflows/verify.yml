@@ -123,9 +123,17 @@ jobs:
         run: sh scripts/check-milestone-evidence.sh --since "${{ github.event.pull_request.base.sha }}"
         if: github.event_name == 'pull_request'
 
-      # Architecture-boundary check — not applicable for shell-script kit (no boundary linter)
-      # - name: Architecture boundaries
-      #   run: <ARCH_CHECK_CMD>
+      # Architecture-boundary check — the layer map AGENTS.md commits to, enforced rather than
+      # asked: src/domain imports nothing but itself; src/application never reaches adapters, the
+      # filesystem, or Electron; adapters never import the composition root; the renderer talks IPC
+      # only; no cycles. Recorded debt, if any is ever added, goes in
+      # .dependency-cruiser-known-violations.json (`npm run arch:baseline`) so the gate fails on NEW
+      # inversions without demanding a refactor first. The baseline is `[]` today: 38 modules, 0
+      # violations.
+      - name: Architecture boundaries
+        run: |
+          npm install --no-save --no-audit --no-fund dependency-cruiser@^18.7.0
+          npm run arch:check
 
       # Secret scan — a leaked credential fails the PR. Pinned, checksum-verified binary (no
       # org-license gate, unlike gitleaks/gitleaks-action). SHA-256 is the vendor-published digest
