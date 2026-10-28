@@ -18,10 +18,13 @@
     "lint": "eslint src test",
     "typecheck": "tsc -p jsconfig.json",
     "format": "prettier --write \"src/**/*.{js,html,css,json}\" \"test/**/*.js\"",
-    "check:sanitize": "bash scripts/check-sanitize.sh"
+    "check:sanitize": "bash scripts/check-sanitize.sh",
+    "arch:check": "depcruise src --config .dependency-cruiser.cjs --ignore-known --output-type err",
+    "arch:baseline": "depcruise src --config .dependency-cruiser.cjs --output-type baseline > .dependency-cruiser-known-violations.json"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
+    "dependency-cruiser": "^18.7.0",
     "electron": "^44.7.0",
     "electron-builder": "^26.15.7",
     "eslint": "^9.15.0",

@@ -89,26 +89,31 @@ the row exists so the first file lands in the right layer instead of being inven
 
 ## Enforcement — the gate, not just the checklist
 
-The checklist below is the human pass. Dependency direction is *also* meant to be checked
-**mechanically**, so a violation fails a command instead of resting on a reviewer noticing it — and it
-binds every contributor equally only once it runs in required CI.
+The checklist below is the human pass. Dependency direction is *also* checked **mechanically**, so a
+violation fails a command instead of resting on a reviewer noticing it — and it binds every contributor
+equally because it runs in **required CI**.
 
-**Not wired yet, and said out loud rather than assumed.** This repo has no dependency-boundary linter
-(`.dependency-cruiser.*`, an import-linter contract, an ArchUnit test), so the architecture-enforcement block was dropped at
-adapt time and no `ARCH_CHECK_CMD` exists. Recommended manual setup, in report-only mode first:
+**Wired — `npm run arch:check`.** `.dependency-cruiser.cjs` encodes the layer rows above as `forbidden`
+rules at `severity: error`: `src/domain` imports nothing but itself, `src/application` never imports
+adapters/infrastructure/renderer/preload and never touches `electron` or an I/O built-in (`node:path`
+stays legal — path arithmetic is pure), adapters never import `src/infrastructure`, the renderer never
+imports the OS layer, preload imports no inner layer, and no dependency cycle may exist. The step runs
+in `.github/workflows/verify.yml` as **Architecture boundaries**.
 
-1. Add `dependency-cruiser` (the JS/TS tool for this stack) with `forbidden` rules encoding the four
-   rows of "This project's layers" — no inner layer may import an outer one.
-2. Wire its invocation into the pre-commit gate beside typecheck and test, and as a **required** CI
-   check in `.github/workflows/verify.yml`.
-3. Start in **report-only** so the violation count is visible without blocking, then flip it to
-   blocking once the count reaches zero. This is exactly where the check earns its keep.
+Measured on the tree that introduced it: **38 modules, 50 dependencies, 0 violations**, in 0.86 s. The
+report-only phase the kit recommends was skipped for that reason — the count was already zero — and
+the gate's detection was proven instead with four planted inversions (domain→`electron`,
+domain→`node:fs`, application→`child_process`, renderer→adapters), each failing with its own rule name.
+
+Existing debt, if it ever appears, is recorded in `.dependency-cruiser-known-violations.json` with
+`npm run arch:baseline`, so the gate fails on NEW inversions while a refactor is pending. That file is
+`[]` today: an empty baseline is a measurement, not an exemption.
 
 ## Review checklist
 
 Run against any diff. Each item is pointable: a reviewer can highlight a line and say "this violates item N."
 
-1. **Import direction.** No file in `src/domain` imports from `src/application`, `src/adapters`, or `src/infrastructure`; no file in `src/application` imports from `src/adapters` or `src/infrastructure`. Read the diff's import block first — it is the fastest violation to spot. *Not yet automated — no dependency-boundary linter exists in this repo; see the setup note below.*
+1. **Import direction.** No file in `src/domain` imports from `src/application`, `src/adapters`, or `src/infrastructure`; no file in `src/application` imports from `src/adapters` or `src/infrastructure`. Read the diff's import block first — it is the fastest violation to spot. *Enforced by `npm run arch:check` (rule `domain-stays-pure` / `application-no-outer-layer`) — see the enforcement section above.*
 2. No framework, IPC, filesystem, SDK, or env import appears in `src/domain` or `src/application` — including decorators, annotations, and type-only imports, which still bind those layers to a vendor's shape and release cycle.
 3. No domain type carries a persistence, validation-library, or serialization annotation.
 4. No use case accepts or returns a framework request/response, a status code, or a transport-shaped envelope.
